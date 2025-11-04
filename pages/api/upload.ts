@@ -15,9 +15,43 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   try {
-    const uploadDir = path.join(process.cwd(), 'uploads')
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true })
+    // Use /tmp for serverless environments (AWS Lambda, Vercel, etc.)
+    // In serverless, only /tmp is writable
+    const isServerless = process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NOW_REGION
+    
+    // Determine upload directory - prefer /tmp for serverless
+    let uploadDir = isServerless 
+      ? path.join('/tmp', 'uploads')
+      : path.join(process.cwd(), 'uploads')
+    
+    // Try to create directory, handle errors gracefully
+    try {
+      if (!fs.existsSync(uploadDir)) {
+        fs.mkdirSync(uploadDir, { recursive: true })
+      }
+    } catch (mkdirError: any) {
+      // If directory creation fails and we're not already using /tmp, try /tmp as fallback
+      if (!isServerless && uploadDir !== path.join('/tmp', 'uploads')) {
+        const tmpUploadDir = path.join('/tmp', 'uploads')
+        try {
+          if (!fs.existsSync(tmpUploadDir)) {
+            fs.mkdirSync(tmpUploadDir, { recursive: true })
+          }
+          uploadDir = tmpUploadDir // Use tmp directory instead
+        } catch (tmpError) {
+          console.error('Failed to create upload directories:', mkdirError, tmpError)
+          return res.status(500).json({ 
+            error: 'Failed to initialize upload directory',
+            message: 'Server configuration issue. Please contact support.'
+          })
+        }
+      } else {
+        console.error('Failed to create upload directory:', mkdirError)
+        return res.status(500).json({ 
+          error: 'Failed to initialize upload directory',
+          message: 'Server configuration issue. Please contact support.'
+        })
+      }
     }
 
     // Disable default body parsing for formidable

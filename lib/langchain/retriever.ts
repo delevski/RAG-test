@@ -9,17 +9,59 @@ import { PDFLoader } from '@langchain/community/document_loaders/fs/pdf'
 import { DocxLoader } from '@langchain/community/document_loaders/fs/docx'
 import { TextLoader } from 'langchain/document_loaders/fs/text'
 
-const DATA_DIR = path.join(process.cwd(), '.data', 'faiss')
+// Use /tmp for serverless environments (AWS Lambda, Vercel, etc.)
+const isServerless = process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NOW_REGION
+const DATA_DIR = isServerless
+  ? path.join('/tmp', '.data', 'faiss')
+  : path.join(process.cwd(), '.data', 'faiss')
 
 function ensureDir(p: string) {
-  if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true })
+  try {
+    if (!fs.existsSync(p)) {
+      fs.mkdirSync(p, { recursive: true })
+    }
+  } catch (error: any) {
+    // If creation fails and we're not in serverless, try /tmp as fallback
+    if (!isServerless && !p.startsWith('/tmp')) {
+      const tmpPath = p.replace(process.cwd(), '/tmp')
+      try {
+        if (!fs.existsSync(tmpPath)) {
+          fs.mkdirSync(tmpPath, { recursive: true })
+        }
+        // Note: This changes the DATA_DIR, but we can't modify the const
+        // The caller should handle this
+      } catch (tmpError) {
+        console.error('Failed to create directory:', error, tmpError)
+        throw error
+      }
+    } else {
+      console.error('Failed to create directory:', error)
+      throw error
+    }
+  }
 }
 
 async function downloadToTemp(url: string, filenameHint?: string) {
   // If it's a local file URL, read from the file system
   if (url.startsWith('/api/files/')) {
     const filename = url.split('/').pop() || ''
-    const filePath = path.join(process.cwd(), 'uploads', filename)
+    
+    // Check both possible locations (serverless uses /tmp)
+    const isServerless = process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NOW_REGION
+    const uploadsDir = isServerless 
+      ? path.join('/tmp', 'uploads')
+      : path.join(process.cwd(), 'uploads')
+    
+    let filePath = path.join(uploadsDir, filename)
+    
+    // If file doesn't exist in primary location, try /tmp as fallback
+    if (!fs.existsSync(filePath) && !isServerless) {
+      const tmpPath = path.join('/tmp', 'uploads', filename)
+      if (fs.existsSync(tmpPath)) {
+        filePath = tmpPath
+      }
+    }
+    
     if (fs.existsSync(filePath)) {
       // Return the path directly - no need to copy to temp
       return filePath

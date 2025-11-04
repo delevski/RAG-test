@@ -12,17 +12,35 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     return res.status(400).json({ error: 'Invalid filename' })
   }
 
-  const filePath = path.join(process.cwd(), 'uploads', filename)
+  // Check both possible locations (serverless uses /tmp)
+  const isServerless = process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NOW_REGION
+  const uploadsDir = isServerless 
+    ? path.join('/tmp', 'uploads')
+    : path.join(process.cwd(), 'uploads')
+  
+  const filePath = path.join(uploadsDir, filename)
 
-  if (!filePath.startsWith(path.join(process.cwd(), 'uploads'))) {
+  // Security check - ensure path is within allowed directory
+  const resolvedPath = path.resolve(filePath)
+  const resolvedDir = path.resolve(uploadsDir)
+  if (!resolvedPath.startsWith(resolvedDir)) {
     return res.status(403).json({ error: 'Forbidden' })
   }
 
-  if (!fs.existsSync(filePath)) {
+  // If file doesn't exist in primary location, try /tmp as fallback
+  let finalPath = filePath
+  if (!fs.existsSync(filePath) && !isServerless) {
+    const tmpPath = path.join('/tmp', 'uploads', filename)
+    if (fs.existsSync(tmpPath)) {
+      finalPath = tmpPath
+    }
+  }
+
+  if (!fs.existsSync(finalPath)) {
     return res.status(404).json({ error: 'File not found' })
   }
 
-  const fileBuffer = fs.readFileSync(filePath)
+  const fileBuffer = fs.readFileSync(finalPath)
   const ext = path.extname(filename).toLowerCase()
   
   const contentTypes: Record<string, string> = {
