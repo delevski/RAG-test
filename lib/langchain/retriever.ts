@@ -135,31 +135,83 @@ export async function indexDocuments(sessionId: string, inputs: Array<{ url: str
   const embeddings = createEmbeddings()
   
   // Use FAISS for local persistence - much simpler and works reliably
-  const vectorStorePath = path.join(DATA_DIR, `session-${sessionId}`)
-  ensureDir(vectorStorePath)
+  let vectorStorePath = path.join(DATA_DIR, `session-${sessionId}`)
   
-  // Create FAISS vector store from documents
-  const vectorStore = await FaissStore.fromDocuments(chunks, embeddings)
+  // Ensure parent directory exists
+  try {
+    ensureDir(vectorStorePath)
+  } catch (error: any) {
+    console.error(`Failed to create vector store directory: ${vectorStorePath}`, error)
+    // In serverless, try /tmp as fallback
+    if (!isServerless) {
+      const tmpPath = path.join('/tmp', '.data', 'faiss', `session-${sessionId}`)
+      try {
+        ensureDir(tmpPath)
+        vectorStorePath = tmpPath // Update the variable
+      } catch (tmpError) {
+        throw new Error(`Failed to create vector store directory: ${error.message}`)
+      }
+    } else {
+      throw new Error(`Failed to create vector store directory: ${error.message}`)
+    }
+  }
   
-  // Save to disk for persistence
-  await vectorStore.save(vectorStorePath)
+  try {
+    // Create FAISS vector store from documents
+    const vectorStore = await FaissStore.fromDocuments(chunks, embeddings)
+    
+    // Save to disk for persistence
+    await vectorStore.save(vectorStorePath)
+    
+    // Verify it was saved - check for index.faiss or similar files
+    const indexPath = path.join(vectorStorePath, 'index.faiss')
+    const indexPklPath = path.join(vectorStorePath, 'index.pkl')
+    if (!fs.existsSync(indexPath) && !fs.existsSync(indexPklPath)) {
+      // FAISS might save differently, check if directory exists and has files
+      const files = fs.existsSync(vectorStorePath) ? fs.readdirSync(vectorStorePath) : []
+      if (files.length === 0) {
+        throw new Error(`Vector store was not saved successfully to ${vectorStorePath}`)
+      }
+    }
+    
+    console.log(`Vector store saved successfully to: ${vectorStorePath}`)
+    console.log(`Files in vector store directory:`, fs.existsSync(vectorStorePath) ? fs.readdirSync(vectorStorePath) : 'none')
+  } catch (error: any) {
+    console.error(`Failed to save vector store to ${vectorStorePath}:`, error)
+    throw new Error(`Failed to save vector store: ${error.message}`)
+  }
 }
 
 export async function getRetriever(sessionId: string) {
   ensureDir(DATA_DIR)
   const embeddings = createEmbeddings()
   
-  const vectorStorePath = path.join(DATA_DIR, `session-${sessionId}`)
+  // Check both possible locations
+  let vectorStorePath = path.join(DATA_DIR, `session-${sessionId}`)
+  
+  // If not found in primary location and not serverless, try /tmp
+  if (!fs.existsSync(vectorStorePath) && !isServerless) {
+    const tmpPath = path.join('/tmp', '.data', 'faiss', `session-${sessionId}`)
+    if (fs.existsSync(tmpPath)) {
+      vectorStorePath = tmpPath
+      console.log(`Found vector store in /tmp location: ${vectorStorePath}`)
+    }
+  }
   
   if (!fs.existsSync(vectorStorePath)) {
+    console.error(`Vector store not found at: ${vectorStorePath}`)
+    console.error(`DATA_DIR: ${DATA_DIR}`)
+    console.error(`isServerless: ${isServerless}`)
     throw new Error(`Vector store for session ${sessionId} not found. Please upload and embed documents first.`)
   }
   
   try {
     // Load FAISS vector store from disk
     const vectorStore = await FaissStore.load(vectorStorePath, embeddings)
+    console.log(`Successfully loaded vector store from: ${vectorStorePath}`)
     return vectorStore.asRetriever({ k: 5 })
   } catch (error: any) {
+    console.error(`Failed to load vector store from ${vectorStorePath}:`, error)
     throw new Error(`Failed to load vector store for session ${sessionId}: ${error.message}`)
   }
 }

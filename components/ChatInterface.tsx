@@ -42,6 +42,20 @@ export default function ChatInterface({ sessionId, uploadedDocs }: { sessionId: 
     }
   }, [messages, isLoading])
 
+  // Auto-embed documents when they're uploaded
+  useEffect(() => {
+    if (hasDocs && uploadedDocs.length > 0) {
+      // Embed documents in background
+      fetch('/api/embed', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId, docs: uploadedDocs })
+      }).catch((err) => {
+        console.error('Failed to embed documents:', err)
+      })
+    }
+  }, [sessionId, hasDocs, uploadedDocs.length]) // Only when session or docs change
+
   async function ensureEmbedded() {
     if (!hasDocs) {
       return false // No documents, use regular chat
