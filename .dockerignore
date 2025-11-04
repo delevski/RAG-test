@@ -1,0 +1,15 @@
+node_modules
+.next
+.git
+.env*.local
+.env
+.DS_Store
+*.log
+test-results
+playwright-report
+playwright/.cache
+uploads
+.data
+*.db
+*.sqlite
+

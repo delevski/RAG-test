@@ -1,0 +1,27 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #0b0d12;
+  --surface: #12151c;
+  --border: #1f2430;
+  --primary: #7c5cff;
+  --secondary: #08d9d6;
+}
+
+html, body, #__next {
+  height: 100%;
+}
+
+body {
+  background: var(--background);
+  color: #e6edf3;
+}
+
+.glass {
+  background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
+  border: 1px solid var(--border);
+  backdrop-filter: blur(10px);
+}
+
