@@ -35,13 +35,13 @@ export default function HomePage() {
         initial={{ opacity: 0 }}
         animate={{ opacity: isLoading ? 0 : 1 }}
         transition={{ duration: 0.3 }}
-        className="grid lg:grid-cols-[300px_1fr] h-dvh"
+        className="h-dvh flex"
       >
         <Sidebar
           uploadedDocs={uploadedDocs}
           onNewSession={handleNewSession}
         />
-        <main className="relative h-full flex flex-col">
+        <main className="relative h-full flex flex-col flex-1 lg:ml-[300px]">
           <div className="sticky top-0 z-10 glass p-4 border-b">
             <div className="flex items-center justify-between mb-3">
               <h1 className="text-lg font-semibold">Smart Research Assistant</h1>

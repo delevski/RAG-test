@@ -4,7 +4,7 @@ type Doc = { name: string; url: string; size: number; type: string }
 
 export default function Sidebar({ uploadedDocs, onNewSession }: { uploadedDocs: Doc[]; onNewSession: () => void }) {
   return (
-    <aside className="h-full border-r border-[var(--border)] bg-[var(--surface)] p-3 flex flex-col">
+    <aside className="fixed left-0 top-0 h-dvh w-[300px] border-r border-[var(--border)] bg-[var(--surface)] p-3 flex flex-col z-30 hidden lg:flex">
       <div className="flex items-center justify-between mb-3">
         <div className="text-sm font-medium">Documents</div>
         <button
@@ -12,7 +12,7 @@ export default function Sidebar({ uploadedDocs, onNewSession }: { uploadedDocs: 
           onClick={onNewSession}
         >New Session</button>
       </div>
-      <div className="flex-1 overflow-auto space-y-2">
+      <div className="flex-1 overflow-y-auto space-y-2">
         {uploadedDocs.length === 0 && (
           <div className="text-xs text-gray-400">No documents uploaded yet.</div>
         )}
