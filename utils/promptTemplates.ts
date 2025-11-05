@@ -6,8 +6,8 @@ export function buildRagPrompt() {
     [
       'system',
       [
-        'You are a precise, concise research assistant. Answer using ONLY the provided context if relevant.',
-        'If the answer is not in the context, say you do not have enough information.',
+        'You are a precise, concise assistant. You may be given optional context extracted from user documents.',
+        'Use the context ONLY if it is relevant and helpful. If the context is irrelevant or not needed, ignore it and answer normally.',
         'When lists are appropriate, format them clearly. Cite relevant document snippets briefly when helpful.',
       ].join('\n')
     ],
@@ -16,7 +16,7 @@ export function buildRagPrompt() {
       [
         'Question: {question}',
         '',
-        'Context:',
+        'Optional Context (may be empty or irrelevant):',
         '{context}',
       ].join('\n')
     ]

@@ -81,11 +81,11 @@ export default function ChatInterface({ sessionId, uploadedDocs }: { sessionId: 
     setInput('')
     setIsLoading(true)
     try {
-      const useRag = await ensureEmbedded().catch(() => false)
+      // Best-effort embed; ignore failures and fall back to hybrid query
+      await ensureEmbedded().catch(() => false)
       
-      // Use RAG endpoint if documents are available, otherwise use regular chat
-      const endpoint = useRag ? '/api/query' : '/api/chat'
-      const res = await fetch(endpoint, {
+      // Always use hybrid query endpoint, which will ignore context when irrelevant/missing
+      const res = await fetch('/api/query', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionId, query: userMsg.content })

@@ -5,11 +5,16 @@ import { getRetriever } from './retriever'
 import { buildRagPrompt } from '@/utils/promptTemplates'
 
 export async function runRagQuery(sessionId: string, query: string, onToken?: (t: string) => void) {
-  const retriever = await getRetriever(sessionId)
-  
-  // Retrieve relevant documents
-  const docs = await retriever.getRelevantDocuments(query)
-  const context = formatDocumentsAsString(docs)
+  let context = ''
+  try {
+    const retriever = await getRetriever(sessionId)
+    // Retrieve relevant documents (best-effort)
+    const docs = await retriever.getRelevantDocuments(query)
+    context = formatDocumentsAsString(docs)
+  } catch (err) {
+    // If vector store missing or fails to load, proceed without context
+    context = ''
+  }
   
   const llm = new ChatOpenAI({
     modelName: process.env.OPENAI_MODEL || 'gpt-4o-mini',
