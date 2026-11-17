@@ -90,12 +90,15 @@ export class NeonSessionStore implements SessionStore {
   async saveSession(sessionId: string, snapshot: SessionSnapshot): Promise<void> {
     assertValidSessionId(sessionId)
     await this.ensureSchema()
+    // Docs are rewritten wholesale per save, like chunks below: an upsert-only
+    // write can never remove rows, which resurrected deleted docs on hydration.
+    // Bounded by MAX_DOCS_PER_SESSION (10).
+    await this.sql`DELETE FROM rag_docs WHERE session_id = ${sessionId}`
     for (const d of snapshot.docs) {
       await this.sql`
         INSERT INTO rag_docs (session_id, url, filename, name, size, mime)
         VALUES (${sessionId}, ${d.url}, ${d.filename}, ${d.name ?? null},
-                ${d.size ?? null}, ${d.type ?? null})
-        ON CONFLICT (session_id, url) DO NOTHING`
+                ${d.size ?? null}, ${d.type ?? null})`
     }
     // Chunks are rewritten wholesale per save; bounded by MAX_CHUNKS_PER_SESSION.
     await this.sql`DELETE FROM rag_chunks WHERE session_id = ${sessionId}`
