@@ -2,13 +2,14 @@ import type { NextApiRequest, NextApiResponse } from 'next'
 import fs from 'fs'
 import path from 'path'
 import { assertValidSessionId, sessionUploadDir } from '@/lib/langchain/retriever'
+import { getSessionStore } from '@/lib/store/sessionStore'
 
 /**
  * Serves an uploaded file back to the OWNING session only. Both the session
  * id and the filename are validated, and the resolved path must stay inside
  * that session's upload directory: no cross-session reads, no traversal.
  */
-export default function handler(req: NextApiRequest, res: NextApiResponse) {
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'GET') {
     return res.status(405).json({ error: 'Method not allowed' })
   }
@@ -33,11 +34,18 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     return res.status(403).json({ error: 'Forbidden' })
   }
 
-  if (!fs.existsSync(resolvedPath)) {
-    return res.status(404).json({ error: 'File not found' })
+  let fileBuffer: Buffer
+  if (fs.existsSync(resolvedPath)) {
+    fileBuffer = fs.readFileSync(resolvedPath)
+  } else {
+    // Cold start wiped the local copy; try the durable store.
+    const store = await getSessionStore()
+    const restored = await store.getFile(session as string, safeName)
+    if (!restored) {
+      return res.status(404).json({ error: 'File not found' })
+    }
+    fileBuffer = restored
   }
-
-  const fileBuffer = fs.readFileSync(resolvedPath)
   const ext = path.extname(safeName).toLowerCase()
 
   const contentTypes: Record<string, string> = {

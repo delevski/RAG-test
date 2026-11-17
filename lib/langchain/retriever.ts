@@ -8,6 +8,12 @@ import { TextLoader } from 'langchain/document_loaders/fs/text'
 import { OpenAIEmbeddings } from '@langchain/openai'
 import { JsonVectorStore } from '@/lib/vectorstore/jsonVectorStore'
 import { MockEmbeddings, RAG_MOCK_ENABLED } from '@/lib/ai/mock'
+import { getSessionStore } from '@/lib/store/sessionStore'
+import {
+  assertValidSessionId as assertSession,
+  sessionDataDir,
+  sessionUploadDir,
+} from '@/lib/store/fileStore'
 
 // ---------------------------------------------------------------------------
 // Bounds — keep a single session (and a single serverless instance) sane.
@@ -19,47 +25,11 @@ export const MAX_QUERY_CHARS = 4000
 const CHUNK_SIZE = 1200
 const CHUNK_OVERLAP = 150
 
-// /tmp is the only writable path on serverless platforms (Vercel, Lambda).
-// Indexes there are NOT durable across cold starts — see INDEX_MISSING.
-const isServerless = Boolean(
-  process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NOW_REGION
-)
-const DATA_DIR = isServerless
-  ? path.join('/tmp', '.data', 'vectors')
-  : path.join(process.cwd(), '.data', 'vectors')
-
-// Session IDs come from the client; strict validation keeps every session in
-// its own directory and prevents path tricks or cross-session access.
-const SESSION_ID_PATTERN = /^[a-zA-Z0-9-]{8,64}$/
-
+// Session validation and upload paths live in the store layer; re-exported
+// here so existing API routes keep their imports.
+export { sessionUploadDir }
 export function assertValidSessionId(sessionId: unknown): asserts sessionId is string {
-  if (typeof sessionId !== 'string' || !SESSION_ID_PATTERN.test(sessionId)) {
-    throw new Error('Invalid sessionId')
-  }
-}
-
-function sessionDir(sessionId: string): string {
-  assertValidSessionId(sessionId)
-  return path.join(DATA_DIR, `session-${sessionId}`)
-}
-
-/** Raw uploads live inside the owning session's directory, never globally. */
-export function sessionUploadDir(sessionId: string): string {
-  return path.join(sessionDir(sessionId), 'uploads')
-}
-
-type Manifest = { docs: Array<{ url: string; name?: string }> }
-
-function manifestPath(dir: string): string {
-  return path.join(dir, 'manifest.json')
-}
-
-function readManifest(dir: string): Manifest {
-  try {
-    return JSON.parse(fs.readFileSync(manifestPath(dir), 'utf8'))
-  } catch {
-    return { docs: [] }
-  }
+  assertSession(sessionId)
 }
 
 function createEmbeddings() {
@@ -81,7 +51,7 @@ function createEmbeddings() {
  * indexed: external URLs are rejected outright (no SSRF surface), and one
  * session can never read another session's files by name.
  */
-function resolveSessionFile(url: string, sessionId: string): string {
+async function resolveSessionFile(url: string, sessionId: string): Promise<string> {
   const match = url.match(/^\/api\/files\/([^/?]+)(\?.*)?$/)
   if (!match) {
     throw new Error('Only previously uploaded files can be indexed')
@@ -93,7 +63,15 @@ function resolveSessionFile(url: string, sessionId: string): string {
     throw new Error('Invalid file path')
   }
   if (!fs.existsSync(filePath)) {
-    throw new Error(`File not found in this session: ${filename}`)
+    // Cold start on serverless wiped the working copy; restore the bytes
+    // from the durable store (Neon) when one is configured.
+    const store = await getSessionStore()
+    const content = await store.getFile(sessionId, filename)
+    if (!content) {
+      throw new Error(`File not found in this session: ${filename}`)
+    }
+    await fs.promises.mkdir(dir, { recursive: true })
+    await fs.promises.writeFile(filePath, content)
   }
   return filePath
 }
@@ -103,7 +81,7 @@ async function loadDocumentsFromUrl(
   sessionId: string,
   name?: string
 ): Promise<Document[]> {
-  const filePath = resolveSessionFile(url, sessionId)
+  const filePath = await resolveSessionFile(url, sessionId)
   const ext = filePath.split('.').pop()?.toLowerCase()
   let loader
   if (ext === 'pdf') loader = new PDFLoader(filePath)
@@ -112,7 +90,7 @@ async function loadDocumentsFromUrl(
   const docs = await loader.load()
   // Bind every chunk to the original document name for citations.
   for (const d of docs) {
-    d.metadata = { ...d.metadata, docName: name || path.basename(filePath) }
+    d.metadata = { ...d.metadata, docName: name || path.basename(filePath), docUrl: url }
   }
   return docs
 }
@@ -137,19 +115,18 @@ export async function indexDocuments(
     throw new Error('No documents provided for indexing')
   }
 
-  const dir = sessionDir(sessionId)
-  const manifest = readManifest(dir)
-  const knownUrls = new Set(manifest.docs.map((d) => d.url))
+  const store = await getSessionStore()
+  const snapshot = (await store.loadSession(sessionId)) ?? { docs: [], chunks: [] }
+  const knownUrls = new Set(snapshot.docs.map((d) => d.url))
   const newInputs = inputs.filter((d) => !knownUrls.has(d.url))
   const skipped = inputs.filter((d) => knownUrls.has(d.url)).map((d) => d.url)
 
-  if (manifest.docs.length + newInputs.length > MAX_DOCS_PER_SESSION) {
+  if (snapshot.docs.length + newInputs.length > MAX_DOCS_PER_SESSION) {
     throw new Error(`A session can hold at most ${MAX_DOCS_PER_SESSION} documents`)
   }
 
   if (newInputs.length === 0) {
-    const existing = JsonVectorStore.exists(dir) ? await JsonVectorStore.load(dir) : null
-    return { indexed: [], skipped, totalChunks: existing?.size ?? 0 }
+    return { indexed: [], skipped, totalChunks: snapshot.chunks.length }
   }
 
   const rawDocs: Document[] = []
@@ -174,32 +151,72 @@ export async function indexDocuments(
   }
 
   const embeddings = createEmbeddings()
+  const engine = new JsonVectorStore(snapshot.chunks)
 
-  let store: JsonVectorStore
-  if (JsonVectorStore.exists(dir)) {
-    store = await JsonVectorStore.load(dir)
-  } else {
-    store = new JsonVectorStore()
-  }
-
-  if (store.size + chunks.length > MAX_CHUNKS_PER_SESSION) {
+  if (engine.size + chunks.length > MAX_CHUNKS_PER_SESSION) {
     throw new Error(
       `Session index is limited to ${MAX_CHUNKS_PER_SESSION} chunks; these documents would exceed it`
     )
   }
 
-  await store.addDocuments(chunks, embeddings)
-  await store.save(dir)
+  await engine.addDocuments(chunks, embeddings)
 
-  manifest.docs.push(...newInputs.map((d) => ({ url: d.url, name: d.name })))
-  await fs.promises.mkdir(dir, { recursive: true })
-  await fs.promises.writeFile(manifestPath(dir), JSON.stringify(manifest, null, 2), 'utf8')
+  snapshot.docs.push(
+    ...newInputs.map((d) => ({
+      url: d.url,
+      filename: path.basename(d.url.split('?')[0]),
+      name: d.name,
+    }))
+  )
+  snapshot.chunks = engine.toChunks()
+  await store.saveSession(sessionId, snapshot)
 
-  return { indexed: newInputs.map((d) => d.url), skipped, totalChunks: store.size }
+  return { indexed: newInputs.map((d) => d.url), skipped, totalChunks: engine.size }
 }
 
-export function isSessionIndexed(sessionId: string): boolean {
-  return JsonVectorStore.exists(sessionDir(sessionId))
+export async function isSessionIndexed(sessionId: string): Promise<boolean> {
+  const store = await getSessionStore()
+  const snapshot = await store.loadSession(sessionId)
+  return Boolean(snapshot && snapshot.chunks.length > 0)
+}
+
+/**
+ * Remove one document from a session: manifest entry, its chunks (tagged
+ * with docUrl at index time) and the stored file bytes. After this, a
+ * refresh hydrates without the document — removal is real, not cosmetic.
+ */
+export async function removeSessionDoc(sessionId: string, url: string): Promise<void> {
+  assertValidSessionId(sessionId)
+  const store = await getSessionStore()
+  const snapshot = await store.loadSession(sessionId)
+  if (!snapshot) return
+  const doc = snapshot.docs.find((d) => d.url === url)
+  snapshot.docs = snapshot.docs.filter((d) => d.url !== url)
+  snapshot.chunks = snapshot.chunks.filter((c) => c.metadata?.docUrl !== url)
+  await store.saveSession(sessionId, snapshot)
+  if (doc) {
+    await store.deleteFile(sessionId, doc.filename)
+    // Best-effort local cleanup of the working copy too.
+    try {
+      fs.unlinkSync(path.join(sessionUploadDir(sessionId), path.basename(doc.filename)))
+    } catch {
+      /* already gone */
+    }
+  }
+}
+
+/** Session-scoped document listing for client hydration after a refresh. */
+export async function listSessionDocs(
+  sessionId: string
+): Promise<{ docs: Array<{ url: string; name?: string; filename: string }>; totalChunks: number }> {
+  assertValidSessionId(sessionId)
+  const store = await getSessionStore()
+  const snapshot = await store.loadSession(sessionId)
+  if (!snapshot) return { docs: [], totalChunks: 0 }
+  return {
+    docs: snapshot.docs.map((d) => ({ url: d.url, name: d.name, filename: d.filename })),
+    totalChunks: snapshot.chunks.length,
+  }
 }
 
 /**
@@ -211,11 +228,12 @@ export async function searchSession(sessionId: string, query: string, k = 5): Pr
   if (query.length > MAX_QUERY_CHARS) {
     throw new Error(`Query is limited to ${MAX_QUERY_CHARS} characters`)
   }
-  const dir = sessionDir(sessionId)
-  if (!JsonVectorStore.exists(dir)) {
+  const store = await getSessionStore()
+  const snapshot = await store.loadSession(sessionId)
+  if (!snapshot || snapshot.chunks.length === 0) {
     throw new Error('INDEX_MISSING')
   }
-  const store = await JsonVectorStore.load(dir)
+  const engine = new JsonVectorStore(snapshot.chunks)
   const embeddings = createEmbeddings()
-  return store.similaritySearch(query, k, embeddings)
+  return engine.similaritySearch(query, k, embeddings)
 }

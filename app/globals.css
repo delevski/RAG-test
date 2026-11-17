@@ -272,6 +272,18 @@ body {
   animation: caret-blink 1s steps(1) infinite;
 }
 
+/* Book logo: subtle page turn */
+.book-page-flip {
+  transform-box: fill-box;
+  transform-origin: left center;
+  animation: page-flip 3.6s ease-in-out infinite;
+}
+@keyframes page-flip {
+  0%, 18% { transform: scaleX(1); }
+  50% { transform: scaleX(0); }
+  82%, 100% { transform: scaleX(1); }
+}
+
 /* Composer focus glow */
 .composer-glow:focus-within {
   box-shadow: 0 0 0 1px rgba(129, 140, 248, 0.45), 0 0 24px rgba(99, 102, 241, 0.22);
@@ -280,6 +292,7 @@ body {
 /* Reduced motion: respect the OS setting everywhere */
 @media (prefers-reduced-motion: reduce) {
   .app-bg::after,
+  .book-page-flip,
   .float-y,
   .logo-halo,
   .shimmer-bar,

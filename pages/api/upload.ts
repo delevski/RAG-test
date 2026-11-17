@@ -3,6 +3,7 @@ import formidable from 'formidable'
 import fs from 'fs'
 import path from 'path'
 import { assertValidSessionId, sessionUploadDir } from '@/lib/langchain/retriever'
+import { getSessionStore } from '@/lib/store/sessionStore'
 
 export const config = {
   api: {
@@ -103,6 +104,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       fs.renameSync(filepath, newPath)
     } else {
       return res.status(500).json({ error: 'File was not saved correctly' })
+    }
+
+    // Persist the bytes through the session store: with the Neon driver this
+    // makes the original file survive serverless cold starts; the file driver
+    // writes the same local copy (idempotent).
+    try {
+      const store = await getSessionStore()
+      if (store.driver !== 'file') {
+        await store.putFile(rawSession as string, newFileName, fs.readFileSync(newPath))
+      }
+    } catch (persistErr) {
+      console.error('Durable file persist failed:', persistErr)
     }
 
     // Session-scoped URL only; never leak the absolute server path.

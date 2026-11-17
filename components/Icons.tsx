@@ -29,19 +29,24 @@ export function LogoMark({ className }: IconProps) {
       </defs>
       <rect width="64" height="64" rx="16" fill="url(#lgm)" />
       <rect width="64" height="64" rx="16" fill="url(#lgm-glow)" />
-      {/* broken orbit ring - the "retrieval" ring around the answer spark */}
-      <circle
-        cx="32" cy="33" r="19"
-        fill="none" stroke="#ffffff" strokeOpacity="0.45" strokeWidth="2.6"
-        strokeLinecap="round" strokeDasharray="74 45.4" transform="rotate(150 32 33)"
-      />
-      {/* comet-star: one elongated beam = the grounded answer */}
+      {/* open book: two pages fanning from a center spine */}
+      <path d="M32 17c-4.2-3-10.4-3.8-16.5-1.8v27.4c6.1-2 12.3-1.2 16.5 1.8z" fill="#ffffff" />
+      <path d="M32 17c4.2-3 10.4-3.8 16.5-1.8v27.4c-6.1-2-12.3-1.2-16.5 1.8z" fill="#ffffff" fillOpacity="0.75" />
+      {/* turning page (subtle loop) - the book "reads" your documents */}
       <path
-        d="M32 10c1.4 7.6 2.6 11.4 5.8 15.2 3 3.5 6.2 5 12.2 6.4-6 1.4-9.2 2.9-12.2 6.4-3.2 3.8-4.4 7.6-5.8 15.2-1.4-7.6-2.6-11.4-5.8-15.2-3-3.5-6.2-5-12.2-6.4 6-1.4 9.2-2.9 12.2-6.4C29.4 21.4 30.6 17.6 32 10z"
+        className="book-page-flip"
+        d="M32 17c4.2-3 10.4-3.8 16.5-1.8v27.4c-6.1-2-12.3-1.2-16.5 1.8z"
         fill="#ffffff"
       />
-      {/* satellite source dot */}
-      <circle cx="49.5" cy="20" r="3.4" fill="#ffffff" fillOpacity="0.95" />
+      {/* text lines on the left page */}
+      <path
+        d="M19.5 21.6c2.8-.9 6-.9 8.8 0M19.5 26.6c2.8-.9 6-.9 8.8 0M19.5 31.6c2.8-.9 6-.9 8.8 0"
+        stroke="#7c6cf0"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        fill="none"
+        opacity="0.6"
+      />
     </svg>
   )
 }

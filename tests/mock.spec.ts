@@ -43,6 +43,35 @@ test.describe('Mock-mode pipeline', () => {
     await expect(page.getByText(/Sea of Tranquility|Apollo 11/i).first()).toBeVisible();
   });
 
+  test('documents survive a browser refresh (session hydration)', async ({ page }) => {
+    await page.goto('/');
+
+    const input = page.locator('aside input[type="file"]');
+    await input.setInputFiles(SAMPLE);
+    await expect(page.getByText('Indexed').first()).toBeVisible({ timeout: 15000 });
+
+    // Refresh: the session id is sticky, so the server-side list hydrates.
+    await page.reload();
+    await expect(page.getByText('sample.txt').first()).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText('Indexed').first()).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText(/Research mode/)).toBeVisible();
+
+    // And the restored session still answers from the document.
+    const chatInput = page.getByPlaceholder(/Ask a question about your documents/i);
+    await chatInput.fill('Who was the first person to land on the Moon?');
+    await chatInput.press('Enter');
+    await expect(page.getByText(/I retrieved \d+ relevant chunk/i)).toBeVisible({
+      timeout: 15000,
+    });
+
+    // Removal is real: delete the doc, refresh, it must stay gone.
+    await page.getByRole('button', { name: /Remove sample.txt/i }).click();
+    await expect(page.locator('aside').getByText('sample.txt')).toHaveCount(0);
+    await page.reload();
+    await expect(page.locator('aside').getByText('sample.txt')).toHaveCount(0);
+    await expect(page.getByText(/Chat mode/)).toBeVisible();
+  });
+
   test('plain chat works without documents in mock mode', async ({ page }) => {
     await page.goto('/');
     const chatInput = page.getByPlaceholder(/Ask me anything or chat/i);

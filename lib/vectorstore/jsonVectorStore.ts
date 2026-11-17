@@ -51,6 +51,11 @@ export class JsonVectorStore {
     return this.chunks.length
   }
 
+  /** Raw chunks, for persisting through the session store layer. */
+  toChunks(): StoredChunk[] {
+    return this.chunks
+  }
+
   static async fromDocuments(docs: Document[], embeddings: Embeddings): Promise<JsonVectorStore> {
     const store = new JsonVectorStore()
     await store.addDocuments(docs, embeddings)

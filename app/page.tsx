@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import Sidebar from '@/components/Sidebar'
 import FileUpload, { type UploadedDoc } from '@/components/FileUpload'
 import DocList from '@/components/DocList'
@@ -10,11 +10,49 @@ import type { DocItem } from '@/lib/docs'
 import { PlusIcon } from '@/components/Icons'
 
 export default function HomePage() {
-  const [sessionId, setSessionId] = useState<string>(() => crypto.randomUUID())
+  // Empty until mounted: the id comes from localStorage, so SSR and the
+  // first client render must agree on "no session yet".
+  const [sessionId, setSessionId] = useState<string>('')
   const [docs, setDocs] = useState<DocItem[]>([])
   const [mobileTab, setMobileTab] = useState<MobileTab>('chat')
   // Serializes embedding work; chat waits on it before querying.
   const embedQueue = useRef<Promise<void>>(Promise.resolve())
+
+  // Restore the session after a refresh: the id is sticky, and the document
+  // list is re-hydrated from the server (which restores it from the durable
+  // store when one is configured). "New Session" is the only reset.
+  const hydrationRan = useRef(false)
+  useEffect(() => {
+    // StrictMode double-invokes effects in dev; hydration must run exactly
+    // once, and it must never overwrite documents uploaded in the meantime.
+    if (hydrationRan.current) return
+    hydrationRan.current = true
+    let id = window.localStorage.getItem('rag:session')
+    if (!id) {
+      id = crypto.randomUUID()
+      window.localStorage.setItem('rag:session', id)
+    }
+    setSessionId(id)
+    fetch(`/api/docs?session=${encodeURIComponent(id)}`)
+      .then((res) => (res.ok ? res.json() : { docs: [] }))
+      .then((data: { docs: Array<{ url: string; name?: string; filename: string }> }) => {
+        if (!Array.isArray(data.docs)) return
+        setDocs((prev) => {
+          if (prev.length > 0) return prev // user already uploaded; server list is stale
+          return data.docs.map((d) => ({
+            id: crypto.randomUUID(),
+            name: d.name ?? d.filename,
+            url: d.url,
+            size: 0,
+            type: '',
+            status: 'ready' as const,
+          }))
+        })
+      })
+      .catch(() => {
+        /* listing failed - the user can re-upload; chat still works */
+      })
+  }, [])
 
   const embedDocs = useCallback(
     (items: DocItem[]) => {
@@ -65,11 +103,21 @@ export default function HomePage() {
     [embedDocs]
   )
 
-  const handleRemoveDoc = useCallback((id: string) => {
-    // Removing a doc only affects the client list; already-embedded chunks
-    // stay in this session's store until the session ends (no re-embedding).
-    setDocs((prev) => prev.filter((d) => d.id !== id))
-  }, [])
+  const handleRemoveDoc = useCallback(
+    (id: string) => {
+      const doc = docs.find((d) => d.id === id)
+      setDocs((prev) => prev.filter((d) => d.id !== id))
+      // Real removal: drop the doc, its chunks and its stored bytes so a
+      // refresh hydrates without it.
+      if (doc) {
+        void fetch(
+          `/api/docs?session=${encodeURIComponent(sessionId)}&url=${encodeURIComponent(doc.url)}`,
+          { method: 'DELETE' }
+        ).catch(() => {})
+      }
+    },
+    [docs, sessionId]
+  )
 
   const handleRetryDoc = useCallback(
     (doc: DocItem) => {
@@ -82,7 +130,9 @@ export default function HomePage() {
   )
 
   const handleNewSession = useCallback(() => {
-    setSessionId(crypto.randomUUID())
+    const id = crypto.randomUUID()
+    window.localStorage.setItem('rag:session', id)
+    setSessionId(id)
     setDocs([])
     embedQueue.current = Promise.resolve()
     setMobileTab('chat')
@@ -101,6 +151,10 @@ export default function HomePage() {
   const awaitReady = useCallback(() => embedQueue.current, [])
 
   const readyCount = docs.filter((d) => d.status === 'ready').length
+
+  if (!sessionId) {
+    return <div className="h-dvh app-bg" aria-busy="true" />
+  }
 
   return (
     <div className="h-dvh app-bg">
