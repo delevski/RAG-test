@@ -8,9 +8,11 @@ import type { StoredChunk } from '@/lib/vectorstore/jsonVectorStore'
  *    restarts on one machine; on serverless platforms the data dir lives in
  *    /tmp, so it survives warm invocations but NOT cold starts.
  *  - neon (durable): Postgres via @neondatabase/serverless, activated ONLY
- *    when RAG_DATABASE_URL is set explicitly for this app. We deliberately
- *    do NOT auto-detect generic POSTGRES_URL / DATABASE_URL variables: an
- *    unrelated database must never become this app's store by accident.
+ *    by app-scoped variables: RAG_DATABASE_URL (explicit, preferred), with
+ *    RAG_DATABASE_POSTGRES_URL as the fallback emitted by the Vercel-Neon
+ *    integration when its env prefix is RAG_DATABASE. We deliberately do NOT
+ *    auto-detect generic POSTGRES_URL / DATABASE_URL variables: an unrelated
+ *    database must never become this app's store by accident.
  *    Documents, chunk embeddings and original file bytes survive any
  *    restart or cold start. Neon is free with no credit card (verified on
  *    their pricing page), and the schema is created by scripts/migrate-neon.mjs
@@ -46,7 +48,8 @@ let active: SessionStore | null = null
 
 export async function getSessionStore(): Promise<SessionStore> {
   if (active) return active
-  const pgUrl = process.env.RAG_DATABASE_URL
+  const pgUrl =
+    process.env.RAG_DATABASE_URL || process.env.RAG_DATABASE_POSTGRES_URL
   if (pgUrl) {
     const { NeonSessionStore } = await import('./neonStore')
     active = new NeonSessionStore(pgUrl)
