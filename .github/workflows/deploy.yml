@@ -34,6 +34,9 @@ jobs:
         run: npm test
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+      - name: Run mock-pipeline E2E (no API key needed)
+        run: npm run test:mock
       
       - name: Build application
         run: npm run build

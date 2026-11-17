@@ -1,59 +1,230 @@
 "use client"
 
-import { useState, useEffect } from 'react'
-import { AnimatePresence, motion } from 'framer-motion'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import Sidebar from '@/components/Sidebar'
-import FileUpload from '@/components/FileUpload'
+import FileUpload, { type UploadedDoc } from '@/components/FileUpload'
+import DocList from '@/components/DocList'
 import ChatInterface from '@/components/ChatInterface'
-import Loader from '@/components/Loader'
+import MobileNav, { type MobileTab } from '@/components/MobileNav'
+import type { DocItem } from '@/lib/docs'
+import { PlusIcon } from '@/components/Icons'
 
 export default function HomePage() {
-  const [sessionId, setSessionId] = useState<string>(() => crypto.randomUUID())
-  const [uploadedDocs, setUploadedDocs] = useState<Array<{ name: string; url: string; size: number; type: string }>>([])
-  const [isLoading, setIsLoading] = useState(true)
+  // Empty until mounted: the id comes from localStorage, so SSR and the
+  // first client render must agree on "no session yet".
+  const [sessionId, setSessionId] = useState<string>('')
+  const [docs, setDocs] = useState<DocItem[]>([])
+  const [mobileTab, setMobileTab] = useState<MobileTab>('chat')
+  // Serializes embedding work; chat waits on it before querying.
+  const embedQueue = useRef<Promise<void>>(Promise.resolve())
 
+  // Restore the session after a refresh: the id is sticky, and the document
+  // list is re-hydrated from the server (which restores it from the durable
+  // store when one is configured). "New Session" is the only reset.
+  const hydrationRan = useRef(false)
   useEffect(() => {
-    // Simulate initial load time for smooth UX
-    const timer = setTimeout(() => {
-      setIsLoading(false)
-    }, 1200) // 1.2 seconds - enough to show the loader, not too long
-
-    return () => clearTimeout(timer)
+    // StrictMode double-invokes effects in dev; hydration must run exactly
+    // once, and it must never overwrite documents uploaded in the meantime.
+    if (hydrationRan.current) return
+    hydrationRan.current = true
+    let id = window.localStorage.getItem('rag:session')
+    if (!id) {
+      id = crypto.randomUUID()
+      window.localStorage.setItem('rag:session', id)
+    }
+    setSessionId(id)
+    fetch(`/api/docs?session=${encodeURIComponent(id)}`)
+      .then((res) => (res.ok ? res.json() : { docs: [] }))
+      .then((data: { docs: Array<{ url: string; name?: string; filename: string }> }) => {
+        if (!Array.isArray(data.docs)) return
+        setDocs((prev) => {
+          if (prev.length > 0) return prev // user already uploaded; server list is stale
+          return data.docs.map((d) => ({
+            id: crypto.randomUUID(),
+            name: d.name ?? d.filename,
+            url: d.url,
+            size: 0,
+            type: '',
+            status: 'ready' as const,
+          }))
+        })
+      })
+      .catch(() => {
+        /* listing failed - the user can re-upload; chat still works */
+      })
   }, [])
 
-  const handleNewSession = () => {
-    setSessionId(crypto.randomUUID())
-    setUploadedDocs([])
+  const embedDocs = useCallback(
+    (items: DocItem[]) => {
+      const run = async () => {
+        try {
+          const res = await fetch('/api/embed', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              sessionId,
+              docs: items.map((d) => ({ url: d.url, name: d.name })),
+            }),
+          })
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({ error: 'Failed to index documents' }))
+            throw new Error(err.message || err.error || 'Failed to index documents')
+          }
+          const ids = new Set(items.map((i) => i.id))
+          setDocs((prev) => prev.map((d) => (ids.has(d.id) ? { ...d, status: 'ready' } : d)))
+        } catch (e: any) {
+          const ids = new Set(items.map((i) => i.id))
+          setDocs((prev) =>
+            prev.map((d) =>
+              ids.has(d.id)
+                ? { ...d, status: 'error', error: e?.message ?? 'Failed to index' }
+                : d
+            )
+          )
+        }
+      }
+      embedQueue.current = embedQueue.current.then(run)
+      return embedQueue.current
+    },
+    [sessionId]
+  )
+
+  const handleUploaded = useCallback(
+    (uploaded: UploadedDoc[]) => {
+      const items: DocItem[] = uploaded.map((u) => ({
+        ...u,
+        id: crypto.randomUUID(),
+        status: 'indexing',
+      }))
+      setDocs((prev) => [...prev, ...items])
+      void embedDocs(items)
+      setMobileTab('chat')
+    },
+    [embedDocs]
+  )
+
+  const handleRemoveDoc = useCallback(
+    (id: string) => {
+      const doc = docs.find((d) => d.id === id)
+      setDocs((prev) => prev.filter((d) => d.id !== id))
+      // Real removal: drop the doc, its chunks and its stored bytes so a
+      // refresh hydrates without it.
+      if (doc) {
+        void fetch(
+          `/api/docs?session=${encodeURIComponent(sessionId)}&url=${encodeURIComponent(doc.url)}`,
+          { method: 'DELETE' }
+        ).catch(() => {})
+      }
+    },
+    [docs, sessionId]
+  )
+
+  const handleRetryDoc = useCallback(
+    (doc: DocItem) => {
+      setDocs((prev) =>
+        prev.map((d) => (d.id === doc.id ? { ...d, status: 'indexing', error: undefined } : d))
+      )
+      void embedDocs([{ ...doc, status: 'indexing' }])
+    },
+    [embedDocs]
+  )
+
+  const handleNewSession = useCallback(() => {
+    const id = crypto.randomUUID()
+    window.localStorage.setItem('rag:session', id)
+    setSessionId(id)
+    setDocs([])
+    embedQueue.current = Promise.resolve()
+    setMobileTab('chat')
+  }, [])
+
+  // Explicit re-index after a serverless cold start wiped the index.
+  // Costs API calls, which is why it only happens on user action.
+  const handleReindex = useCallback(async (): Promise<boolean> => {
+    const ready = docs.filter((d) => d.status !== 'error')
+    if (ready.length === 0) return false
+    setDocs((prev) => prev.map((d) => ({ ...d, status: 'indexing', error: undefined })))
+    await embedDocs(ready.map((d) => ({ ...d, status: 'indexing' as const })))
+    return true
+  }, [docs, embedDocs])
+
+  const awaitReady = useCallback(() => embedQueue.current, [])
+
+  const readyCount = docs.filter((d) => d.status === 'ready').length
+
+  if (!sessionId) {
+    return <div className="h-dvh app-bg" aria-busy="true" />
   }
 
   return (
-    <>
-      <AnimatePresence>
-        {isLoading && <Loader />}
-      </AnimatePresence>
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: isLoading ? 0 : 1 }}
-        transition={{ duration: 0.3 }}
-        className="h-dvh flex"
-      >
-        <Sidebar
-          uploadedDocs={uploadedDocs}
-          onNewSession={handleNewSession}
-        />
-        <main className="relative h-full flex flex-col flex-1 lg:ml-[300px]">
-          <div className="sticky top-0 z-10 glass p-4 border-b">
-            <div className="flex items-center justify-between mb-3">
-              <h1 className="text-lg font-semibold">Smart Research Assistant</h1>
+    <div className="h-dvh app-bg">
+      <Sidebar
+        uploadedDocs={docs}
+        sessionId={sessionId}
+        onNewSession={handleNewSession}
+        onUploaded={handleUploaded}
+        onRemoveDoc={handleRemoveDoc}
+        onRetryDoc={handleRetryDoc}
+      />
+
+      <main className="h-dvh flex flex-col lg:ml-[320px] pb-[64px] lg:pb-0">
+        <header className="shrink-0 sticky top-0 z-20 glass border-x-0 border-t-0 px-4 py-3 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <h1 className="text-base sm:text-lg font-semibold tracking-tight truncate">
+              Smart Research Assistant
+            </h1>
+            {process.env.NEXT_PUBLIC_RAG_MOCK === '1' && (
+              <span className="inline-flex items-center rounded-full border border-amber-400/40 bg-amber-400/10 px-2.5 py-0.5 text-[10px] font-medium text-amber-300">
+                Demo mode · simulated answers
+              </span>
+            )}
+            <span
+              className={`hidden sm:inline-flex items-center rounded-full border px-2.5 py-0.5 text-[10px] font-medium ${
+                readyCount > 0
+                  ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300'
+                  : 'border-[var(--border)] bg-white/[0.03] text-dim'
+              }`}
+            >
+              {readyCount > 0
+                ? `Research mode · ${readyCount} document${readyCount === 1 ? '' : 's'}`
+                : 'Chat mode'}
+            </span>
+          </div>
+          <button
+            onClick={handleNewSession}
+            className="lg:hidden shrink-0 flex items-center gap-1.5 rounded-lg border border-[var(--border)] px-2.5 py-1.5 text-xs text-gray-200 hover:border-primary/50 transition-colors"
+          >
+            <PlusIcon className="w-3.5 h-3.5" />
+            New
+          </button>
+        </header>
+
+        {/* Chat panel */}
+        <div className={`flex-1 overflow-hidden ${mobileTab === 'chat' ? '' : 'hidden lg:block'}`}>
+          <ChatInterface
+            key={sessionId}
+            sessionId={sessionId}
+            docs={docs}
+            awaitReady={awaitReady}
+            onReindex={handleReindex}
+          />
+        </div>
+
+        {/* Mobile files panel */}
+        <div
+          className={`flex-1 overflow-y-auto lg:hidden ${mobileTab === 'files' ? 'rise-in' : 'hidden'}`}
+        >
+          <div className="max-w-xl mx-auto p-4 space-y-4">
+            <FileUpload sessionId={sessionId} onComplete={handleUploaded} />
+            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-dim">
+              Documents
             </div>
-            <FileUpload onComplete={(docs) => setUploadedDocs((prev) => [...prev, ...docs])} />
+            <DocList docs={docs} onRemove={handleRemoveDoc} onRetry={handleRetryDoc} />
           </div>
-          <div className="flex-1 overflow-hidden">
-            <ChatInterface sessionId={sessionId} uploadedDocs={uploadedDocs} />
-          </div>
-        </main>
-      </motion.div>
-    </>
+        </div>
+      </main>
+
+      <MobileNav tab={mobileTab} onChange={setMobileTab} docCount={docs.length} />
+    </div>
   )
 }
-
