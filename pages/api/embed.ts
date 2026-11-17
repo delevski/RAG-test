@@ -54,6 +54,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (err?.message?.includes('at most')) {
       return res.status(400).json({ error: err.message })
     }
+    if (err?.message?.includes('Only previously uploaded files')) {
+      return res.status(400).json({ error: 'Only files uploaded to this session can be indexed' })
+    }
+    if (err?.message?.includes('File not found in this session')) {
+      return res.status(404).json({ error: err.message.replace('Failed to load document ', '') })
+    }
 
     return res.status(500).json({ error: err?.message ?? 'Internal error' })
   }

@@ -1,6 +1,5 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import os from 'node:os'
 import { RecursiveCharacterTextSplitter } from 'langchain/text_splitter'
 import { Document } from '@langchain/core/documents'
 import { PDFLoader } from '@langchain/community/document_loaders/fs/pdf'
@@ -44,6 +43,11 @@ function sessionDir(sessionId: string): string {
   return path.join(DATA_DIR, `session-${sessionId}`)
 }
 
+/** Raw uploads live inside the owning session's directory, never globally. */
+export function sessionUploadDir(sessionId: string): string {
+  return path.join(sessionDir(sessionId), 'uploads')
+}
+
 type Manifest = { docs: Array<{ url: string; name?: string }> }
 
 function manifestPath(dir: string): string {
@@ -71,39 +75,35 @@ function createEmbeddings() {
   })
 }
 
-async function downloadToTemp(url: string, filenameHint?: string): Promise<string> {
-  if (url.startsWith('/api/files/')) {
-    const filename = url.split('/').pop() || ''
-    const uploadsDir = isServerless
-      ? path.join('/tmp', 'uploads')
-      : path.join(process.cwd(), 'uploads')
-
-    let filePath = path.join(uploadsDir, filename)
-    if (!fs.existsSync(filePath) && !isServerless) {
-      const tmpPath = path.join('/tmp', 'uploads', filename)
-      if (fs.existsSync(tmpPath)) filePath = tmpPath
-    }
-    if (fs.existsSync(filePath)) return filePath
-    throw new Error(`Local file not found: ${filename}`)
+/**
+ * Resolve a document URL to a local file inside the OWNING session's upload
+ * directory. Only files previously uploaded through /api/upload can be
+ * indexed: external URLs are rejected outright (no SSRF surface), and one
+ * session can never read another session's files by name.
+ */
+function resolveSessionFile(url: string, sessionId: string): string {
+  const match = url.match(/^\/api\/files\/([^/?]+)(\?.*)?$/)
+  if (!match) {
+    throw new Error('Only previously uploaded files can be indexed')
   }
-
-  const fullUrl = url.startsWith('http') ? url : `http://localhost:${process.env.PORT || 3000}${url}`
-  const res = await fetch(fullUrl)
-  if (!res.ok) throw new Error(`Failed to download: ${res.status}`)
-  const bytes = Buffer.from(await res.arrayBuffer())
-  const ext = (
-    filenameHint?.split('.').pop() ||
-    url.split('?')[0].split('.').pop() ||
-    'bin'
-  ).toLowerCase()
-  const tmp = path.join(os.tmpdir(), `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`)
-  await fs.promises.writeFile(tmp, bytes)
-  return tmp
+  const filename = path.basename(match[1])
+  const dir = sessionUploadDir(sessionId)
+  const filePath = path.join(dir, filename)
+  if (path.resolve(filePath) !== path.resolve(path.join(dir, filename))) {
+    throw new Error('Invalid file path')
+  }
+  if (!fs.existsSync(filePath)) {
+    throw new Error(`File not found in this session: ${filename}`)
+  }
+  return filePath
 }
 
-async function loadDocumentsFromUrl(url: string, name?: string): Promise<Document[]> {
-  const filePath = await downloadToTemp(url, name)
-  const isLocalFile = url.startsWith('/api/files/')
+async function loadDocumentsFromUrl(
+  url: string,
+  sessionId: string,
+  name?: string
+): Promise<Document[]> {
+  const filePath = resolveSessionFile(url, sessionId)
   const ext = filePath.split('.').pop()?.toLowerCase()
   let loader
   if (ext === 'pdf') loader = new PDFLoader(filePath)
@@ -113,9 +113,6 @@ async function loadDocumentsFromUrl(url: string, name?: string): Promise<Documen
   // Bind every chunk to the original document name for citations.
   for (const d of docs) {
     d.metadata = { ...d.metadata, docName: name || path.basename(filePath) }
-  }
-  if (!isLocalFile) {
-    await fs.promises.unlink(filePath).catch(() => {})
   }
   return docs
 }
@@ -158,7 +155,7 @@ export async function indexDocuments(
   const rawDocs: Document[] = []
   for (const d of newInputs) {
     try {
-      rawDocs.push(...(await loadDocumentsFromUrl(d.url, d.name)))
+      rawDocs.push(...(await loadDocumentsFromUrl(d.url, sessionId, d.name)))
     } catch (error: any) {
       throw new Error(`Failed to load document ${d.name || d.url}: ${error.message}`)
     }

@@ -12,9 +12,11 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB; matches the server limit
 
 export default function FileUpload({
   onComplete,
+  sessionId,
   compact = false,
 }: {
   onComplete: (files: UploadedDoc[]) => void
+  sessionId: string
   compact?: boolean
 }) {
   const [isDragging, setIsDragging] = useState(false)
@@ -46,7 +48,7 @@ export default function FileUpload({
       for (const file of files) {
         try {
           setCurrentFile(file.name)
-          const { url } = await uploadToLocal(file, (p) => setProgress(p))
+          const { url } = await uploadToLocal(file, sessionId, (p) => setProgress(p))
           uploaded.push({ name: file.name, url, size: file.size, type: file.type })
         } catch (err: any) {
           setError(err?.message ?? `Failed to upload ${file.name}`)
@@ -58,7 +60,7 @@ export default function FileUpload({
       setUploading(false)
       if (uploaded.length) onComplete(uploaded)
     },
-    [onComplete]
+    [onComplete, sessionId]
   )
 
   const handleDrop = useCallback(

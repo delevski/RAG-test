@@ -19,7 +19,7 @@ A full-stack retrieval-augmented generation app: Next.js 14 + TypeScript + Tailw
 | --- | --- | --- |
 | Framework | Next.js 14 (App Router UI, Pages API routes) | Hybrid: React Server/Client Components for UI, classic API routes with raw `res.write` streaming |
 | Retrieval | LangChain document loaders + `RecursiveCharacterTextSplitter` | Battle-tested parsing (pdf-parse, mammoth) and splitting |
-| Vector store | **Custom `JsonVectorStore`** (pure TS, cosine similarity, JSON persistence) | Replaced `faiss-node`: a native module that is fragile on serverless. Zero native deps, predictable installs, trivially auditable |
+| Vector store | **Custom `JsonVectorStore`** (pure TS, cosine similarity, JSON persistence) | Replaced `faiss-node`: a native C++ addon (node-gyp build, libomp runtime dependency, no reliable prebuilt binaries) that is fragile on serverless. Zero native deps, predictable installs, trivially auditable |
 | Embeddings / chat | OpenAI (`text-embedding-3-small`, `gpt-4o-mini` by default) | Cheap, good quality, key stays server-side |
 | Mock provider | `RAG_MOCK=1` deterministic embeddings + canned stream | The full pipeline runs in CI and offline with **no paid calls** |
 | Styling | TailwindCSS + custom design tokens, Inter | Dark, token-driven design system |
@@ -28,7 +28,7 @@ A full-stack retrieval-augmented generation app: Next.js 14 + TypeScript + Tailw
 ### Architecture
 
 ```
-Browser ──upload──> /api/upload ──> /tmp|uploads/ (validated: type, size)
+Browser ──upload──> /api/upload ──> per-session uploads dir (validated: type, size, sessionId)
    │                                     │
    │            /api/embed ──────────────┤ load → split → embed
    │                  │                  ▼
@@ -83,13 +83,19 @@ npm run dev
 
 | Route | Method | Body | Notes |
 | --- | --- | --- | --- |
-| `/api/upload` | POST | multipart `file` | Validates extension + size server-side |
+| `/api/upload` | POST | multipart `file` + `sessionId` | Validates session, extension + size server-side; writes into the owning session's directory |
 | `/api/embed` | POST | `{ sessionId, docs: [{url, name}] }` | Idempotent per session manifest — retries never double-embed |
 | `/api/query` | POST | `{ sessionId, query, expectContext }` | Streams text; `__SOURCES__` trailer with citations; `409 INDEX_MISSING` when the index was lost |
-| `/api/files/[filename]` | GET | — | Serves uploaded files (path-traversal guarded) |
+| `/api/files/[filename]?session=<id>` | GET | — | Serves an upload back to its owning session only (id + traversal guarded) |
 | `/api/health` | GET | — | Liveness probe |
 
 Session bounds: ≤10 documents, ≤1500 chunks, ≤4000-char queries per session.
+
+### Isolation model
+
+- Uploads and indexes live under a per-session directory; the session id (a client-generated `crypto.randomUUID()`) is the only access token. `/api/files` and `/api/embed` validate it and can never read another session's files.
+- `/api/embed` indexes **only** files previously uploaded to the same session — external URLs are rejected, so the endpoint has no SSRF surface.
+- This is demo-grade isolation (no accounts/auth). Add an auth layer before sharing a deployment widely.
 
 ## Deployment
 

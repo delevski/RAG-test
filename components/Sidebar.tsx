@@ -7,12 +7,14 @@ import { LogoMark, PlusIcon } from './Icons'
 
 export default function Sidebar({
   uploadedDocs,
+  sessionId,
   onNewSession,
   onUploaded,
   onRemoveDoc,
   onRetryDoc,
 }: {
   uploadedDocs: DocItem[]
+  sessionId: string
   onNewSession: () => void
   onUploaded: (files: UploadedDoc[]) => void
   onRemoveDoc: (id: string) => void
@@ -39,7 +41,7 @@ export default function Sidebar({
       </div>
 
       <div className="px-4 pt-4">
-        <FileUpload compact onComplete={onUploaded} />
+        <FileUpload compact sessionId={sessionId} onComplete={onUploaded} />
       </div>
 
       <div className="px-4 pt-5 pb-2 flex items-center justify-between">

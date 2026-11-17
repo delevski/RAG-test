@@ -1,10 +1,10 @@
 # Pipeline
 
 ```
-┌─────────┐   upload (multipart, validated)   ┌───────────────┐
+┌─────────┐   upload (multipart, session-scoped, validated)   ┌───────────────┐
 │ Browser │ ─────────────────────────────────> │  /api/upload  │
 └─────────┘                                    └──────┬────────┘
-     │                                                │ /tmp|uploads/
+     │                                                │ per-session dir
      │ POST /api/embed { sessionId, docs }            ▼
      │ ┌────────────────────────────────────────────────────────┐
      │ │ load (pdf-parse / mammoth / text) → split (1200/150)   │

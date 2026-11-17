@@ -1,5 +1,10 @@
-export async function uploadToLocal(file: File, onProgress?: (p: number) => void): Promise<{ url: string; path: string }> {
+export async function uploadToLocal(
+  file: File,
+  sessionId: string,
+  onProgress?: (p: number) => void
+): Promise<{ url: string }> {
   const formData = new FormData()
+  formData.append('sessionId', sessionId)
   formData.append('file', file)
   
   return new Promise((resolve, reject) => {
@@ -15,7 +20,7 @@ export async function uploadToLocal(file: File, onProgress?: (p: number) => void
     xhr.addEventListener('load', () => {
       if (xhr.status === 200) {
         const response = JSON.parse(xhr.responseText)
-        resolve({ url: response.url, path: response.path })
+        resolve({ url: response.url })
       } else {
         const error = xhr.responseText ? JSON.parse(xhr.responseText) : { error: 'Upload failed' }
         reject(new Error(error.error || `Upload failed: ${xhr.statusText}`))

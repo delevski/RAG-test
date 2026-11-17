@@ -95,6 +95,7 @@ test.describe('Mock-mode pipeline', () => {
     // Craft an unsupported upload through the API contract the client uses
     const res = await page.request.post('/api/upload', {
       multipart: {
+        sessionId: 'test-session-sec',
         file: {
           name: 'evil.exe',
           mimeType: 'application/octet-stream',
@@ -105,6 +106,28 @@ test.describe('Mock-mode pipeline', () => {
     expect(res.status()).toBe(400);
     const body = await res.json();
     expect(body.error).toMatch(/Unsupported file type/i);
+  });
+
+  test('embed rejects external URLs (no SSRF)', async ({ page }) => {
+    const res = await page.request.post('/api/embed', {
+      data: {
+        sessionId: 'test-session-ssrf',
+        docs: [{ url: 'http://example.com/secret.txt', name: 'secret.txt' }],
+      },
+    });
+    expect(res.status()).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/uploaded/i);
+  });
+
+  test('embed rejects another session\'s file url (isolation)', async ({ page }) => {
+    const res = await page.request.post('/api/embed', {
+      data: {
+        sessionId: 'test-session-other',
+        docs: [{ url: '/api/files/1-sample.txt?session=test-session-ssrf', name: 'sample.txt' }],
+      },
+    });
+    expect([400, 404]).toContain(res.status());
   });
 
   test('query endpoint validates sessionId', async ({ page }) => {

@@ -2,6 +2,7 @@ import type { NextApiRequest, NextApiResponse } from 'next'
 import formidable from 'formidable'
 import fs from 'fs'
 import path from 'path'
+import { assertValidSessionId, sessionUploadDir } from '@/lib/langchain/retriever'
 
 export const config = {
   api: {
@@ -21,43 +22,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   try {
-    const isServerless =
-      process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NOW_REGION
-
-    let uploadDir = isServerless
-      ? path.join('/tmp', 'uploads')
-      : path.join(process.cwd(), 'uploads')
-
-    try {
-      if (!fs.existsSync(uploadDir)) {
-        fs.mkdirSync(uploadDir, { recursive: true })
-      }
-    } catch (mkdirError: any) {
-      if (!isServerless && uploadDir !== path.join('/tmp', 'uploads')) {
-        const tmpUploadDir = path.join('/tmp', 'uploads')
-        try {
-          if (!fs.existsSync(tmpUploadDir)) {
-            fs.mkdirSync(tmpUploadDir, { recursive: true })
-          }
-          uploadDir = tmpUploadDir
-        } catch (tmpError) {
-          console.error('Failed to create upload directories:', mkdirError, tmpError)
-          return res.status(500).json({
-            error: 'Failed to initialize upload directory',
-            message: 'Server configuration issue. Please contact support.',
-          })
-        }
-      } else {
-        console.error('Failed to create upload directory:', mkdirError)
-        return res.status(500).json({
-          error: 'Failed to initialize upload directory',
-          message: 'Server configuration issue. Please contact support.',
-        })
-      }
-    }
-
+    // Parse once: we need the sessionId field before deciding WHERE the file
+    // may be written. formidable streams into a temp dir, then we move the
+    // file into the owning session's directory (or delete it when invalid).
     const form = formidable({
-      uploadDir,
       keepExtensions: true,
       maxFileSize: MAX_FILE_SIZE,
       multiples: false,
@@ -69,7 +37,33 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         else resolve([fields, files])
       })
     })
+    const fields = parsed[0]
     const files = parsed[1]
+
+    const rawSession = Array.isArray(fields.sessionId) ? fields.sessionId[0] : fields.sessionId
+    try {
+      assertValidSessionId(rawSession)
+    } catch {
+      for (const f of Object.values(files)) {
+        const one = Array.isArray(f) ? f[0] : f
+        const p = (one as any)?.filepath || (one as any)?.path
+        if (p && fs.existsSync(p)) fs.unlinkSync(p)
+      }
+      return res.status(400).json({ error: 'Invalid sessionId' })
+    }
+
+    const uploadDir = sessionUploadDir(rawSession as string)
+    try {
+      if (!fs.existsSync(uploadDir)) {
+        fs.mkdirSync(uploadDir, { recursive: true })
+      }
+    } catch (mkdirError: any) {
+      console.error('Failed to create upload directory:', mkdirError)
+      return res.status(500).json({
+        error: 'Failed to initialize upload directory',
+        message: 'Server configuration issue. Please contact support.',
+      })
+    }
 
     const file = Array.isArray(files.file) ? files.file[0] : files.file
     if (!file) {
@@ -111,11 +105,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(500).json({ error: 'File was not saved correctly' })
     }
 
-    const url = `/api/files/${newFileName}`
+    // Session-scoped URL only; never leak the absolute server path.
+    const url = `/api/files/${newFileName}?session=${rawSession}`
 
     res.status(200).json({
       url,
-      path: newPath,
       name: originalFilename,
       size,
       type: mimetype,

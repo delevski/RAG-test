@@ -106,6 +106,7 @@ export default function HomePage() {
     <div className="h-dvh app-bg">
       <Sidebar
         uploadedDocs={docs}
+        sessionId={sessionId}
         onNewSession={handleNewSession}
         onUploaded={handleUploaded}
         onRemoveDoc={handleRemoveDoc}
@@ -118,6 +119,11 @@ export default function HomePage() {
             <h1 className="text-base sm:text-lg font-semibold tracking-tight truncate">
               Smart Research Assistant
             </h1>
+            {process.env.NEXT_PUBLIC_RAG_MOCK === '1' && (
+              <span className="inline-flex items-center rounded-full border border-amber-400/40 bg-amber-400/10 px-2.5 py-0.5 text-[10px] font-medium text-amber-300">
+                Demo mode · simulated answers
+              </span>
+            )}
             <span
               className={`hidden sm:inline-flex items-center rounded-full border px-2.5 py-0.5 text-[10px] font-medium ${
                 readyCount > 0
@@ -155,7 +161,7 @@ export default function HomePage() {
           className={`flex-1 overflow-y-auto lg:hidden ${mobileTab === 'files' ? '' : 'hidden'}`}
         >
           <div className="max-w-xl mx-auto p-4 space-y-4">
-            <FileUpload onComplete={handleUploaded} />
+            <FileUpload sessionId={sessionId} onComplete={handleUploaded} />
             <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-dim">
               Documents
             </div>
