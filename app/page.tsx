@@ -335,6 +335,19 @@ function ClaudeKeyPanel({
           Your key stays in this browser tab only: it is never saved, never stored, and is
           sent only with the question you ask. Closing or refreshing the tab forgets it.
         </p>
+        <label htmlFor="claude-key-input" className="sr-only">
+          Anthropic API key
+        </label>
+        <input
+          id="claude-key-input"
+          type="password"
+          autoComplete="off"
+          autoFocus
+          placeholder="sk-ant-..."
+          value={value}
+          onChange={(e) => setValue(e.target.value.trim())}
+          className="w-full rounded-lg border border-[var(--border)] bg-white/[0.03] px-3 py-2 text-sm outline-none focus:border-primary/60"
+        />
         <div className="border-t border-[var(--border)] pt-3 space-y-2">
           <p className="text-xs text-dim leading-relaxed">
             Site owner? Enter the owner passphrase to answer with the site&rsquo;s own key.
@@ -353,19 +366,6 @@ function ClaudeKeyPanel({
             className="w-full rounded-lg border border-[var(--border)] bg-white/[0.03] px-3 py-2 text-sm outline-none focus:border-primary/60"
           />
         </div>
-        <label htmlFor="claude-key-input" className="sr-only">
-          Anthropic API key
-        </label>
-        <input
-          id="claude-key-input"
-          type="password"
-          autoComplete="off"
-          autoFocus
-          placeholder="sk-ant-..."
-          value={value}
-          onChange={(e) => setValue(e.target.value.trim())}
-          className="w-full rounded-lg border border-[var(--border)] bg-white/[0.03] px-3 py-2 text-sm outline-none focus:border-primary/60"
-        />
         <div className="flex items-center justify-end gap-2">
           {(currentKey || currentOwnerToken) && (
             <button
