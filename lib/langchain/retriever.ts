@@ -119,7 +119,7 @@ export type IndexResult = {
  */
 export async function indexDocuments(
   sessionId: string,
-  inputs: Array<{ url: string; name?: string }>
+  inputs: Array<{ url: string; name?: string; size?: number; type?: string }>
 ): Promise<IndexResult> {
   assertValidSessionId(sessionId)
   if (!Array.isArray(inputs) || inputs.length === 0) {
@@ -189,6 +189,8 @@ export async function indexDocuments(
       url: d.url,
       filename: path.basename(d.url.split('?')[0]),
       name: d.name,
+      size: typeof d.size === 'number' && d.size >= 0 ? d.size : undefined,
+      type: typeof d.type === 'string' ? d.type.slice(0, 200) : undefined,
     }))
   )
   snapshot.chunks = engine.toChunks()
@@ -231,13 +233,22 @@ export async function removeSessionDoc(sessionId: string, url: string): Promise<
 /** Session-scoped document listing for client hydration after a refresh. */
 export async function listSessionDocs(
   sessionId: string
-): Promise<{ docs: Array<{ url: string; name?: string; filename: string }>; totalChunks: number }> {
+): Promise<{
+  docs: Array<{ url: string; name?: string; filename: string; size?: number; type?: string }>
+  totalChunks: number
+}> {
   assertValidSessionId(sessionId)
   const store = await getSessionStore()
   const snapshot = await store.loadSession(sessionId)
   if (!snapshot) return { docs: [], totalChunks: 0 }
   return {
-    docs: snapshot.docs.map((d) => ({ url: d.url, name: d.name, filename: d.filename })),
+    docs: snapshot.docs.map((d) => ({
+      url: d.url,
+      name: d.name,
+      filename: d.filename,
+      size: d.size,
+      type: d.type,
+    })),
     totalChunks: snapshot.chunks.length,
   }
 }

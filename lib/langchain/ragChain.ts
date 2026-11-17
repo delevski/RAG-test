@@ -1,4 +1,5 @@
 import { ChatOpenAI } from '@langchain/openai'
+import { ChatAnthropic } from '@langchain/anthropic'
 import { StringOutputParser } from '@langchain/core/output_parsers'
 import { formatDocumentsAsString } from 'langchain/util/document'
 import { searchSession } from './retriever'
@@ -31,7 +32,7 @@ export async function runRagQuery(
   sessionId: string,
   query: string,
   onToken: (t: string) => void,
-  opts: { expectContext?: boolean } = {}
+  opts: { expectContext?: boolean; anthropicKey?: string } = {}
 ): Promise<RagResult> {
   let context = ''
   let sources: SourceCitation[] = []
@@ -49,6 +50,29 @@ export async function runRagQuery(
         sources.push({ name, snippet: d.pageContent.replace(/\s+/g, ' ').slice(0, 220) })
       }
     }
+  }
+
+  const prompt = buildRagPrompt()
+
+  // BYOK: the visitor supplies their own Anthropic key for this request.
+  // The key lives only in this invocation — never persisted, never logged.
+  // A user-supplied key IS the paid opt-in for this call, so it bypasses the
+  // server-side fail-closed guard (which protects OUR keys, not theirs).
+  if (opts.anthropicKey) {
+    const llm = new ChatAnthropic({
+      apiKey: opts.anthropicKey,
+      model: process.env.ANTHROPIC_MODEL || 'claude-haiku-5-5',
+      temperature: 0.2,
+      streaming: true,
+    })
+    const chain = prompt.pipe(llm).pipe(new StringOutputParser())
+    const stream = await chain.stream({ context, question: query })
+    for await (const chunk of stream) {
+      if (typeof chunk === 'string') {
+        onToken(chunk)
+      }
+    }
+    return { sources, usedContext: context.length > 0 }
   }
 
   if (RAG_MOCK_ENABLED) {
@@ -70,7 +94,6 @@ export async function runRagQuery(
     openAIApiKey: process.env.OPENAI_API_KEY,
   })
 
-  const prompt = buildRagPrompt()
   const chain = prompt.pipe(llm).pipe(new StringOutputParser())
   const stream = await chain.stream({ context, question: query })
 

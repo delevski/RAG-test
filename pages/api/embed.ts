@@ -24,7 +24,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const { sessionId, docs } = req.body as {
       sessionId: string
-      docs: Array<{ url: string; name?: string }>
+      docs: Array<{ url: string; name?: string; size?: number; type?: string }>
     }
     assertValidSessionId(sessionId)
     if (!Array.isArray(docs) || docs.length === 0) {

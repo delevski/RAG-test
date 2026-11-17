@@ -1,4 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
+import { validateAnthropicKey } from '@/lib/ai/byok'
 import { runRagQuery } from '@/lib/langchain/ragChain'
 import { assertValidSessionId, MAX_QUERY_CHARS } from '@/lib/langchain/retriever'
 import { RAG_MOCK_ENABLED, PAID_AI_DISABLED, paidAIAllowed } from '@/lib/ai/mock'
@@ -24,10 +25,11 @@ export const config = {
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') return res.status(405).end('Method not allowed')
-  const { sessionId, query, expectContext } = req.body as {
+  const { sessionId, query, expectContext, anthropicKey } = req.body as {
     sessionId: string
     query: string
     expectContext?: boolean
+    anthropicKey?: unknown
   }
   try {
     assertValidSessionId(sessionId)
@@ -39,7 +41,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(400).end(`Query is limited to ${MAX_QUERY_CHARS} characters`)
   }
 
-  if (!RAG_MOCK_ENABLED) {
+  // BYOK: a visitor-supplied Anthropic key is validated in shape only, used
+  // for this single request, and never persisted or logged.
+  let userAnthropicKey: string | undefined
+  try {
+    userAnthropicKey = validateAnthropicKey(anthropicKey) ?? undefined
+  } catch {
+    return res.status(400).end('Invalid Anthropic API key format')
+  }
+
+  if (!userAnthropicKey && !RAG_MOCK_ENABLED) {
     if (!paidAIAllowed()) {
       return res.status(400).end(PAID_AI_DISABLED)
     }
@@ -54,6 +65,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   try {
     const { sources } = await runRagQuery(sessionId, query, (token) => res.write(token), {
       expectContext: Boolean(expectContext),
+      anthropicKey: userAnthropicKey,
     })
     if (sources.length > 0) {
       res.write(`\n\n__SOURCES__${JSON.stringify(sources)}`)
@@ -78,7 +90,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       res.status(500).end(err.message)
       return
     }
-    console.error('query error', err)
+    // Never echo provider error bodies back: they can quote the request key.
+    console.error('query error', err?.message ?? err)
+    if (userAnthropicKey) {
+      const status = err?.status ?? err?.error?.status
+      if (status === 401) return res.status(502).end('Anthropic rejected the API key')
+      return res.status(502).end('Anthropic request failed')
+    }
     res.status(500).end(err?.message ?? 'Internal error')
   }
 }
