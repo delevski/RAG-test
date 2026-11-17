@@ -15,6 +15,11 @@ export default function HomePage() {
   const [sessionId, setSessionId] = useState<string>('')
   const [docs, setDocs] = useState<DocItem[]>([])
   const [mobileTab, setMobileTab] = useState<MobileTab>('chat')
+  // BYOK: the visitor's Claude key lives ONLY in this React state. It is
+  // never written to localStorage, cookies or the server beyond the single
+  // request that uses it. Refreshing the tab forgets it by design.
+  const [anthropicKey, setAnthropicKey] = useState('')
+  const [keyPanelOpen, setKeyPanelOpen] = useState(false)
   // Serializes embedding work; chat waits on it before querying.
   const embedQueue = useRef<Promise<void>>(Promise.resolve())
 
@@ -173,11 +178,22 @@ export default function HomePage() {
             <h1 className="text-base sm:text-lg font-semibold tracking-tight truncate">
               Smart Research Assistant
             </h1>
-            {process.env.NEXT_PUBLIC_RAG_MOCK === '1' && (
+            {process.env.NEXT_PUBLIC_RAG_MOCK === '1' && !anthropicKey && (
               <span className="inline-flex items-center rounded-full border border-amber-400/40 bg-amber-400/10 px-2.5 py-0.5 text-[10px] font-medium text-amber-300">
                 Demo mode · simulated answers
               </span>
             )}
+            {anthropicKey && (
+              <span className="inline-flex items-center rounded-full border border-emerald-400/40 bg-emerald-400/10 px-2.5 py-0.5 text-[10px] font-medium text-emerald-300">
+                Claude connected · answers billed to your key
+              </span>
+            )}
+            <button
+              onClick={() => setKeyPanelOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border)] bg-white/[0.03] px-2.5 py-0.5 text-[10px] font-medium text-dim hover:border-primary/50 hover:text-white transition-colors"
+            >
+              {anthropicKey ? 'Key settings' : 'Use your Claude key'}
+            </button>
             <span
               className={`hidden sm:inline-flex items-center rounded-full border px-2.5 py-0.5 text-[10px] font-medium ${
                 readyCount > 0
@@ -207,6 +223,7 @@ export default function HomePage() {
             docs={docs}
             awaitReady={awaitReady}
             onReindex={handleReindex}
+            anthropicKey={anthropicKey || undefined}
           />
         </div>
 
@@ -225,6 +242,89 @@ export default function HomePage() {
       </main>
 
       <MobileNav tab={mobileTab} onChange={setMobileTab} docCount={docs.length} />
+
+      {keyPanelOpen && (
+        <ClaudeKeyPanel
+          currentKey={anthropicKey}
+          onSave={(k) => {
+            setAnthropicKey(k)
+            setKeyPanelOpen(false)
+          }}
+          onClear={() => {
+            setAnthropicKey('')
+            setKeyPanelOpen(false)
+          }}
+          onClose={() => setKeyPanelOpen(false)}
+        />
+      )}
+    </div>
+  )
+}
+
+function ClaudeKeyPanel({
+  currentKey,
+  onSave,
+  onClear,
+  onClose,
+}: {
+  currentKey: string
+  onSave: (key: string) => void
+  onClear: () => void
+  onClose: () => void
+}) {
+  const [value, setValue] = useState('')
+  const valid = value.startsWith('sk-ant-') && value.length >= 20
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-md rounded-2xl border border-[var(--border)] bg-[var(--surface,#14141c)] p-5 space-y-4"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold">Use your own Claude key</h2>
+          <button onClick={onClose} className="text-dim hover:text-white text-lg leading-none">
+            &times;
+          </button>
+        </div>
+        <p className="text-xs text-dim leading-relaxed">
+          Enter your Anthropic API key to get real Claude answers instead of the demo.
+          Answers made with your key are billed to your Anthropic account (Claude Haiku:
+          fractions of a cent per answer). Document retrieval in this demo is keyword-based,
+          not semantic embeddings.
+        </p>
+        <p className="text-xs text-dim leading-relaxed">
+          Your key stays in this browser tab only: it is never saved, never stored, and is
+          sent only with the question you ask. Closing or refreshing the tab forgets it.
+        </p>
+        <input
+          type="password"
+          autoComplete="off"
+          placeholder="sk-ant-..."
+          value={value}
+          onChange={(e) => setValue(e.target.value.trim())}
+          className="w-full rounded-lg border border-[var(--border)] bg-white/[0.03] px-3 py-2 text-sm outline-none focus:border-primary/60"
+        />
+        <div className="flex items-center justify-end gap-2">
+          {currentKey && (
+            <button
+              onClick={onClear}
+              className="rounded-lg border border-red-400/40 px-3 py-1.5 text-xs text-red-300 hover:bg-red-400/10"
+            >
+              Disconnect
+            </button>
+          )}
+          <button
+            disabled={!valid}
+            onClick={() => onSave(value)}
+            className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-white disabled:opacity-40"
+          >
+            Connect for this tab
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
