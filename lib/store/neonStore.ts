@@ -12,7 +12,9 @@ import { assertValidSessionId } from './fileStore'
  * chunks). The documented scale path is pgvector with an ivfflat index.
  */
 
-type SqlFn = (strings: TemplateStringsArray, ...params: any[]) => Promise<any[]>
+type SqlFn = ((strings: TemplateStringsArray, ...params: any[]) => Promise<any[]>) & {
+  transaction?: (fn: (tx: (strings: TemplateStringsArray, ...params: any[]) => Promise<any[]>) => Promise<void>) => Promise<void>
+}
 
 export class NeonSessionStore implements SessionStore {
   readonly driver = 'neon' as const
@@ -90,25 +92,34 @@ export class NeonSessionStore implements SessionStore {
   async saveSession(sessionId: string, snapshot: SessionSnapshot): Promise<void> {
     assertValidSessionId(sessionId)
     await this.ensureSchema()
-    // Docs are rewritten wholesale per save, like chunks below: an upsert-only
-    // write can never remove rows, which resurrected deleted docs on hydration.
-    // Bounded by MAX_DOCS_PER_SESSION (10).
-    await this.sql`DELETE FROM rag_docs WHERE session_id = ${sessionId}`
-    for (const d of snapshot.docs) {
-      await this.sql`
-        INSERT INTO rag_docs (session_id, url, filename, name, size, mime)
-        VALUES (${sessionId}, ${d.url}, ${d.filename}, ${d.name ?? null},
-                ${d.size ?? null}, ${d.type ?? null})`
+    // Docs and chunks are rewritten wholesale per save: an upsert-only write
+    // can never remove rows, which resurrected deleted docs on hydration.
+    // The whole rewrite runs in ONE transaction so a concurrent save for the
+    // same session serializes instead of interleaving DELETE/INSERT phases
+    // (which could drop rows or leave docs without chunks). Bounded by
+    // MAX_DOCS_PER_SESSION (10) and MAX_CHUNKS_PER_SESSION (1500).
+    const rewrite = async (q: (strings: TemplateStringsArray, ...params: any[]) => Promise<any[]>) => {
+      await q`DELETE FROM rag_docs WHERE session_id = ${sessionId}`
+      for (const d of snapshot.docs) {
+        await q`
+          INSERT INTO rag_docs (session_id, url, filename, name, size, mime)
+          VALUES (${sessionId}, ${d.url}, ${d.filename}, ${d.name ?? null},
+                  ${d.size ?? null}, ${d.type ?? null})`
+      }
+      await q`DELETE FROM rag_chunks WHERE session_id = ${sessionId}`
+      for (let i = 0; i < snapshot.chunks.length; i++) {
+        const ch = snapshot.chunks[i]
+        await q`
+          INSERT INTO rag_chunks (session_id, idx, content, metadata, embedding)
+          VALUES (${sessionId}, ${i}, ${ch.content},
+                  ${JSON.stringify(ch.metadata ?? {})}::jsonb,
+                  ${JSON.stringify(ch.embedding)}::jsonb)`
+      }
     }
-    // Chunks are rewritten wholesale per save; bounded by MAX_CHUNKS_PER_SESSION.
-    await this.sql`DELETE FROM rag_chunks WHERE session_id = ${sessionId}`
-    for (let i = 0; i < snapshot.chunks.length; i++) {
-      const ch = snapshot.chunks[i]
-      await this.sql`
-        INSERT INTO rag_chunks (session_id, idx, content, metadata, embedding)
-        VALUES (${sessionId}, ${i}, ${ch.content},
-                ${JSON.stringify(ch.metadata ?? {})}::jsonb,
-                ${JSON.stringify(ch.embedding)}::jsonb)`
+    if (this.sql.transaction) {
+      await this.sql.transaction(rewrite)
+    } else {
+      await rewrite(this.sql)
     }
   }
 
