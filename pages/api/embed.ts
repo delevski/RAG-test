@@ -4,17 +4,22 @@ import {
   assertValidSessionId,
   MAX_DOCS_PER_SESSION,
 } from '@/lib/langchain/retriever'
-import { RAG_MOCK_ENABLED } from '@/lib/ai/mock'
+import { RAG_MOCK_ENABLED, PAID_AI_DISABLED, paidAIAllowed } from '@/lib/ai/mock'
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
   try {
-    if (!RAG_MOCK_ENABLED && !process.env.OPENAI_API_KEY) {
-      return res.status(400).json({
-        error: 'OPENAI_API_KEY is missing',
-        message:
-          'Please add your OpenAI API key to .env.local file. Get your key from https://platform.openai.com/api-keys',
-      })
+    if (!RAG_MOCK_ENABLED) {
+      if (!paidAIAllowed()) {
+        return res.status(400).json({ error: 'Paid AI calls are disabled', message: PAID_AI_DISABLED })
+      }
+      if (!process.env.OPENAI_API_KEY) {
+        return res.status(400).json({
+          error: 'OPENAI_API_KEY is missing',
+          message:
+            'Please add your OpenAI API key to .env.local file. Get your key from https://platform.openai.com/api-keys',
+        })
+      }
     }
 
     const { sessionId, docs } = req.body as {
@@ -43,6 +48,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     if (err?.message === 'Invalid sessionId') {
       return res.status(400).json({ error: 'Invalid sessionId' })
+    }
+    if (err?.message?.startsWith('PAID_AI_DISABLED')) {
+      return res.status(400).json({ error: 'Paid AI calls are disabled', message: err.message })
+    }
+    if (err?.message?.startsWith('EMBEDDING_MODE_MISMATCH')) {
+      return res.status(409).json({ error: 'Embedding mode mismatch', message: err.message })
+    }
+    if (err?.message?.startsWith('RAG_STORAGE_UNCONFIGURED')) {
+      return res.status(500).json({ error: 'Storage is not configured for Production', message: err.message })
     }
     if (err?.message?.includes('OPENAI_API_KEY')) {
       return res.status(400).json({

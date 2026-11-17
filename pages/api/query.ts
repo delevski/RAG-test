@@ -1,7 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
 import { runRagQuery } from '@/lib/langchain/ragChain'
 import { assertValidSessionId, MAX_QUERY_CHARS } from '@/lib/langchain/retriever'
-import { RAG_MOCK_ENABLED } from '@/lib/ai/mock'
+import { RAG_MOCK_ENABLED, PAID_AI_DISABLED, paidAIAllowed } from '@/lib/ai/mock'
 
 /**
  * Answer stream protocol (text/plain):
@@ -39,8 +39,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(400).end(`Query is limited to ${MAX_QUERY_CHARS} characters`)
   }
 
-  if (!RAG_MOCK_ENABLED && !process.env.OPENAI_API_KEY) {
-    return res.status(400).end('OPENAI_API_KEY is missing')
+  if (!RAG_MOCK_ENABLED) {
+    if (!paidAIAllowed()) {
+      return res.status(400).end(PAID_AI_DISABLED)
+    }
+    if (!process.env.OPENAI_API_KEY) {
+      return res.status(400).end('OPENAI_API_KEY is missing')
+    }
   }
 
   res.setHeader('Content-Type', 'text/plain; charset=utf-8')
@@ -59,6 +64,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       // The index lived in /tmp of a different instance. Re-indexing spends
       // the API key, so the client must ask the user first.
       res.status(409).json({ error: 'INDEX_MISSING' })
+      return
+    }
+    if (err?.message?.startsWith('EMBEDDING_MODE_MISMATCH')) {
+      res.status(409).json({ error: 'EMBEDDING_MODE_MISMATCH', message: err.message })
+      return
+    }
+    if (err?.message?.startsWith('PAID_AI_DISABLED')) {
+      res.status(400).end(err.message)
+      return
+    }
+    if (err?.message?.startsWith('RAG_STORAGE_UNCONFIGURED')) {
+      res.status(500).end(err.message)
       return
     }
     console.error('query error', err)

@@ -3,7 +3,7 @@ import { StringOutputParser } from '@langchain/core/output_parsers'
 import { formatDocumentsAsString } from 'langchain/util/document'
 import { searchSession } from './retriever'
 import { buildRagPrompt } from '@/utils/promptTemplates'
-import { mockChatStream, RAG_MOCK_ENABLED } from '@/lib/ai/mock'
+import { mockChatStream, RAG_MOCK_ENABLED, PAID_AI_DISABLED, paidAIAllowed } from '@/lib/ai/mock'
 
 export type SourceCitation = {
   name: string
@@ -56,6 +56,11 @@ export async function runRagQuery(
       onToken(token)
     }
     return { sources, usedContext: context.length > 0 }
+  }
+
+  // Fail-closed: real (paid) chat calls require an explicit opt-in.
+  if (!paidAIAllowed()) {
+    throw new Error(PAID_AI_DISABLED)
   }
 
   const llm = new ChatOpenAI({

@@ -7,7 +7,14 @@ import { DocxLoader } from '@langchain/community/document_loaders/fs/docx'
 import { TextLoader } from 'langchain/document_loaders/fs/text'
 import { OpenAIEmbeddings } from '@langchain/openai'
 import { JsonVectorStore } from '@/lib/vectorstore/jsonVectorStore'
-import { MockEmbeddings, RAG_MOCK_ENABLED } from '@/lib/ai/mock'
+import {
+  MockEmbeddings,
+  RAG_MOCK_ENABLED,
+  PAID_AI_DISABLED,
+  activeEmbeddingSpec,
+  assertEmbeddingCompatibility,
+  paidAIAllowed,
+} from '@/lib/ai/mock'
 import { getSessionStore } from '@/lib/store/sessionStore'
 import {
   assertValidSessionId as assertSession,
@@ -34,13 +41,17 @@ export function assertValidSessionId(sessionId: unknown): asserts sessionId is s
 
 function createEmbeddings() {
   if (RAG_MOCK_ENABLED) return new MockEmbeddings()
+  // Fail-closed: real (paid) embedding calls require an explicit opt-in.
+  if (!paidAIAllowed()) {
+    throw new Error(PAID_AI_DISABLED)
+  }
   if (!process.env.OPENAI_API_KEY) {
     throw new Error(
       'OPENAI_API_KEY environment variable is missing. Please add it to your .env.local file.'
     )
   }
   return new OpenAIEmbeddings({
-    model: 'text-embedding-3-small',
+    model: process.env.OPENAI_EMBEDDING_MODEL || 'text-embedding-3-small',
     apiKey: process.env.OPENAI_API_KEY,
   })
 }
@@ -151,6 +162,18 @@ export async function indexDocuments(
   }
 
   const embeddings = createEmbeddings()
+  // Refuse to mix embedding modes in one session: chunks embedded by a
+  // different model/dimension would silently corrupt ranking. Data is kept;
+  // the caller decides to switch back or re-index.
+  assertEmbeddingCompatibility(
+    snapshot.chunks.map((c) => c.embedding.length),
+    activeEmbeddingSpec()
+  )
+  // Stamp every new chunk with the embedding identity for later validation.
+  const spec = activeEmbeddingSpec()
+  for (const chunk of chunks) {
+    chunk.metadata = { ...chunk.metadata, embeddingModel: spec.model, embeddingDim: spec.dim }
+  }
   const engine = new JsonVectorStore(snapshot.chunks)
 
   if (engine.size + chunks.length > MAX_CHUNKS_PER_SESSION) {
@@ -235,5 +258,9 @@ export async function searchSession(sessionId: string, query: string, k = 5): Pr
   }
   const engine = new JsonVectorStore(snapshot.chunks)
   const embeddings = createEmbeddings()
+  assertEmbeddingCompatibility(
+    snapshot.chunks.map((c) => c.embedding.length),
+    activeEmbeddingSpec()
+  )
   return engine.similaritySearch(query, k, embeddings)
 }

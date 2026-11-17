@@ -16,6 +16,57 @@ export const RAG_MOCK_ENABLED = process.env.RAG_MOCK === '1'
 
 const MOCK_DIM = 128
 
+/**
+ * Fail-closed paid provider guard.
+ *
+ * Real (paid) AI calls happen ONLY when RAG_ALLOW_PAID=1 is set explicitly.
+ * Default posture: no paid calls, ever - a missing RAG_MOCK variable can
+ * never bill the account by accident. Read lazily so tests can toggle env.
+ */
+export function paidAIAllowed(): boolean {
+  return process.env.RAG_ALLOW_PAID === '1'
+}
+
+export const PAID_AI_DISABLED =
+  'PAID_AI_DISABLED: real (paid) AI calls are disabled. Set RAG_MOCK=1 for the free demo, ' +
+  'or set RAG_ALLOW_PAID=1 together with OPENAI_API_KEY to enable paid OpenAI calls.'
+
+/** Identity of the active embedding model, for compatibility validation. */
+export function activeEmbeddingSpec(): { model: string; dim: number } {
+  if (RAG_MOCK_ENABLED) return { model: 'mock-bow-hash', dim: MOCK_DIM }
+  const model = process.env.OPENAI_EMBEDDING_MODEL || 'text-embedding-3-small'
+  const dims: Record<string, number> = {
+    'text-embedding-3-small': 1536,
+    'text-embedding-3-large': 3072,
+    'text-embedding-ada-002': 1536,
+  }
+  return { model, dim: dims[model] ?? 1536 }
+}
+
+/**
+ * Chunks indexed under one embedding model/dimension are not searchable by
+ * another (the JS cosine search does not detect the mismatch and would rank
+ * garbage silently). Data is never purged automatically: a mismatch is an
+ * actionable error, and re-indexing happens only after an explicit decision.
+ */
+export const EMBEDDING_MODE_MISMATCH = 'EMBEDDING_MODE_MISMATCH'
+
+export function assertEmbeddingCompatibility(
+  storedDims: Iterable<number>,
+  spec: { model: string; dim: number }
+): void {
+  for (const storedDim of storedDims) {
+    if (storedDim !== spec.dim) {
+      throw new Error(
+        `${EMBEDDING_MODE_MISMATCH}: this session was indexed with a ${storedDim}-dim embedding ` +
+          `but the active provider is "${spec.model}" (${spec.dim}-dim). The stored documents are ` +
+          `kept untouched; switch the embedding mode back (RAG_MOCK) or re-index the documents ` +
+          `after an explicit decision - retrieval across modes would silently return wrong results.`
+      )
+    }
+  }
+}
+
 function hashToken(token: string): number {
   let h = 2166136261
   for (let i = 0; i < token.length; i++) {

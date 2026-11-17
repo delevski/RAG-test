@@ -54,6 +54,19 @@ export async function getSessionStore(): Promise<SessionStore> {
     const { NeonSessionStore } = await import('./neonStore')
     active = new NeonSessionStore(pgUrl)
   } else {
+    // Fail loud in production: the file driver is ephemeral on serverless,
+    // so silently falling back would lose every document on the next cold
+    // start - the exact bug this layer exists to fix. Preview and local
+    // development keep the file driver as the documented demo mode.
+    if (process.env.VERCEL_ENV === 'production' && process.env.RAG_ALLOW_EPHEMERAL !== '1') {
+      throw new Error(
+        'RAG_STORAGE_UNCONFIGURED: no durable store is configured for Production. ' +
+          'Extend RAG_DATABASE_URL / RAG_DATABASE_POSTGRES_URL to the Production environment ' +
+          '(Vercel > Project > Settings > Environment Variables). ' +
+          'Falling back to the ephemeral file driver would lose all documents on the next cold start. ' +
+          'Set RAG_ALLOW_EPHEMERAL=1 only to accept that data loss deliberately.'
+      )
+    }
     const { FileSessionStore } = await import('./fileStore')
     active = new FileSessionStore()
   }
