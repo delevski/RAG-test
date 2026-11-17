@@ -1,29 +1,26 @@
 import './globals.css'
+import type { Metadata, Viewport } from 'next'
+import { Inter } from 'next/font/google'
 import type { ReactNode } from 'react'
+
+const inter = Inter({ subsets: ['latin'], variable: '--font-inter', display: 'swap' })
+
+export const metadata: Metadata = {
+  title: 'Smart Research Assistant',
+  description:
+    'Upload documents and chat with answers grounded in your sources. A retrieval-augmented generation app built with Next.js, LangChain and OpenAI.',
+}
+
+export const viewport: Viewport = {
+  themeColor: '#07080c',
+  width: 'device-width',
+  initialScale: 1,
+}
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
-      <head>
-        <title>Smart Research Assistant</title>
-        <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📚</text></svg>" />
-      </head>
-      <body className="min-h-screen antialiased">
-        {children}
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `
-              window.addEventListener('error', function(e) {
-                if (e.message && e.message.includes('Firebase')) {
-                  console.warn('Firebase error caught - this app uses local storage, not Firebase');
-                  e.preventDefault();
-                }
-              });
-            `,
-          }}
-        />
-      </body>
+    <html lang="en" className={inter.variable}>
+      <body className="min-h-dvh font-sans antialiased">{children}</body>
     </html>
   )
 }
-

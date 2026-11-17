@@ -1,166 +1,168 @@
 "use client"
 
-import { useCallback, useState, useRef } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { uploadToLocal } from '@/lib/storage/uploadLocal'
+import { UploadIcon, AlertIcon } from './Icons'
 
-type UploadedDoc = { name: string; url: string; size: number; type: string }
+export type UploadedDoc = { name: string; url: string; size: number; type: string }
 
-export default function FileUpload({ onComplete }: { onComplete: (files: UploadedDoc[]) => void }) {
+const ACCEPTED_EXTENSIONS = ['.pdf', '.doc', '.docx', '.txt']
+const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB; matches the server limit
+
+export default function FileUpload({
+  onComplete,
+  compact = false,
+}: {
+  onComplete: (files: UploadedDoc[]) => void
+  compact?: boolean
+}) {
   const [isDragging, setIsDragging] = useState(false)
   const [progress, setProgress] = useState<number | null>(null)
+  const [currentFile, setCurrentFile] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [uploading, setUploading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const handleDragEnter = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    setIsDragging(true)
-  }, [])
+  const uploadFiles = useCallback(
+    async (candidates: File[]) => {
+      setError(null)
+      const files = candidates.filter((file) => {
+        const ext = `.${file.name.split('.').pop()?.toLowerCase() ?? ''}`
+        return ACCEPTED_EXTENSIONS.includes(ext)
+      })
+      if (files.length === 0) {
+        setError('Please upload PDF, DOCX, or TXT files only')
+        return
+      }
+      const oversized = files.find((f) => f.size > MAX_FILE_SIZE)
+      if (oversized) {
+        setError(`"${oversized.name}" is too large. Maximum size is 10MB.`)
+        return
+      }
 
-  const handleDragLeave = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    // Only set dragging to false if we're leaving the drop zone itself
-    if (e.currentTarget === e.target) {
+      setUploading(true)
+      const uploaded: UploadedDoc[] = []
+      for (const file of files) {
+        try {
+          setCurrentFile(file.name)
+          const { url } = await uploadToLocal(file, (p) => setProgress(p))
+          uploaded.push({ name: file.name, url, size: file.size, type: file.type })
+        } catch (err: any) {
+          setError(err?.message ?? `Failed to upload ${file.name}`)
+        } finally {
+          setProgress(null)
+          setCurrentFile(null)
+        }
+      }
+      setUploading(false)
+      if (uploaded.length) onComplete(uploaded)
+    },
+    [onComplete]
+  )
+
+  const handleDrop = useCallback(
+    async (e: React.DragEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
       setIsDragging(false)
-    }
-  }, [])
+      await uploadFiles(Array.from(e.dataTransfer.files))
+    },
+    [uploadFiles]
+  )
 
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-  }, [])
-
-  const handleDrop = useCallback(async (e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    setIsDragging(false)
-    setError(null)
-    
-    const files = Array.from(e.dataTransfer.files).filter(file => {
-      const ext = file.name.split('.').pop()?.toLowerCase()
-      return ['pdf', 'doc', 'docx', 'txt'].includes(ext || '')
-    })
-    
-    if (files.length === 0) {
-      setError('Please upload PDF, DOCX, or TXT files only')
-      return
-    }
-
-    setUploading(true)
-    const uploaded: UploadedDoc[] = []
-    
-    for (const file of files) {
-      try {
-        const { url } = await uploadToLocal(file, (p) => setProgress(p))
-        uploaded.push({ name: file.name, url, size: file.size, type: file.type })
-      } catch (err: any) {
-        setError(err?.message ?? `Failed to upload ${file.name}`)
-      } finally {
-        setProgress(null)
-      }
-    }
-    
-    setUploading(false)
-    if (uploaded.length) onComplete(uploaded)
-  }, [onComplete])
-
-  const handleFileInput = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!e.target.files) return
-    setError(null)
-    setUploading(true)
-    
-    const files = Array.from(e.target.files)
-    const uploaded: UploadedDoc[] = []
-    
-    for (const file of files) {
-      try {
-        const { url } = await uploadToLocal(file, (p) => setProgress(p))
-        uploaded.push({ name: file.name, url, size: file.size, type: file.type })
-      } catch (err: any) {
-        setError(err?.message ?? `Failed to upload ${file.name}`)
-      } finally {
-        setProgress(null)
-      }
-    }
-    
-    setUploading(false)
-    if (uploaded.length) onComplete(uploaded)
-    if (e.currentTarget) {
-      e.currentTarget.value = ''
-    }
-  }, [onComplete])
-
-  const handleClick = useCallback(() => {
-    fileInputRef.current?.click()
-  }, [])
+  const handleFileInput = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (!e.target.files) return
+      await uploadFiles(Array.from(e.target.files))
+      e.target.value = ''
+    },
+    [uploadFiles]
+  )
 
   return (
-    <>
+    <div>
       <input
         ref={fileInputRef}
         type="file"
         multiple
         onChange={handleFileInput}
         className="hidden"
-        accept=".pdf,.doc,.docx,.txt"
+        accept={ACCEPTED_EXTENSIONS.join(',')}
       />
       <div
-        onDragEnter={handleDragEnter}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
+        role="button"
+        tabIndex={0}
+        onDragEnter={(e) => {
+          e.preventDefault()
+          setIsDragging(true)
+        }}
+        onDragOver={(e) => e.preventDefault()}
+        onDragLeave={(e) => {
+          if (e.currentTarget === e.target) setIsDragging(false)
+        }}
         onDrop={handleDrop}
-        onClick={handleClick}
-        className={`
-          relative border-2 border-dashed rounded-lg p-6 cursor-pointer transition-all duration-200
-          ${isDragging 
-            ? 'border-primary bg-primary/10 scale-105' 
-            : 'border-[var(--border)] bg-[var(--surface)] hover:border-primary/50 hover:bg-[var(--surface)]/80'
+        onClick={() => !uploading && fileInputRef.current?.click()}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            if (!uploading) fileInputRef.current?.click()
           }
-          ${uploading ? 'pointer-events-none opacity-75' : ''}
+        }}
+        className={`
+          relative border-2 border-dashed rounded-2xl cursor-pointer transition-all duration-200
+          ${compact ? 'p-4' : 'p-8'}
+          ${
+            isDragging
+              ? 'border-primary bg-primary/10 scale-[1.02]'
+              : 'border-[var(--border)] bg-[var(--surface-2)]/50 hover:border-primary/50 hover:bg-[var(--surface-2)]'
+          }
+          ${uploading ? 'pointer-events-none opacity-80' : ''}
         `}
       >
-        <div className="flex flex-col items-center justify-center gap-3 text-center">
-          <div className={`text-4xl ${isDragging ? 'scale-110' : ''} transition-transform`}>
-            📄
+        <div className="flex flex-col items-center justify-center gap-2.5 text-center">
+          <div
+            className={`rounded-xl gradient-bg text-white flex items-center justify-center shadow-glow transition-transform ${
+              compact ? 'w-9 h-9' : 'w-11 h-11'
+            } ${isDragging ? 'scale-110' : ''}`}
+          >
+            <UploadIcon className={compact ? 'w-4 h-4' : 'w-5 h-5'} />
           </div>
           <div>
-            <p className="text-sm font-medium text-gray-200 mb-1">
+            <p className={`font-medium text-gray-100 ${compact ? 'text-xs' : 'text-sm'}`}>
               {isDragging ? 'Drop files here' : 'Drop files here or click to browse'}
             </p>
-            <p className="text-xs text-gray-400">
-              Supports PDF, DOCX, and TXT files
-            </p>
+            <p className="text-xs text-dim mt-0.5">Supports PDF, DOCX, and TXT files</p>
           </div>
           {progress !== null && (
-            <div className="w-full max-w-xs">
-              <div className="w-full bg-[var(--border)] h-2 rounded-full overflow-hidden">
+            <div className="w-full max-w-[200px]">
+              <div className="w-full bg-[var(--border)] h-1.5 rounded-full overflow-hidden">
                 <motion.div
                   initial={{ width: 0 }}
                   animate={{ width: `${progress}%` }}
-                  className="h-full bg-primary rounded-full"
+                  className="h-full gradient-bg rounded-full"
                 />
               </div>
-              <p className="text-xs text-gray-400 mt-1">{progress}%</p>
+              <p className="text-[10px] text-dim mt-1 truncate">
+                {currentFile} — {progress}%
+              </p>
             </div>
           )}
         </div>
-        <AnimatePresence>
-          {error && (
-            <motion.div
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0 }}
-              className="absolute bottom-2 left-0 right-0 text-center"
-            >
-              <p className="text-xs text-red-400 bg-red-900/20 px-3 py-1 rounded">{error}</p>
-            </motion.div>
-          )}
-        </AnimatePresence>
       </div>
-    </>
+      <AnimatePresence>
+        {error && (
+          <motion.div
+            initial={{ opacity: 0, y: -6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            className="mt-2 flex items-start gap-1.5 text-xs text-red-300 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2"
+          >
+            <AlertIcon className="w-3.5 h-3.5 mt-px shrink-0" />
+            <span>{error}</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
   )
 }
-

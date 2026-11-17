@@ -8,7 +8,7 @@ test.describe('Smart Research Assistant - Smoke Tests', () => {
 
   test('should display upload zone', async ({ page }) => {
     await page.goto('/');
-    await expect(page.getByText('Drop files here or click to browse')).toBeVisible();
+    await expect(page.locator('aside').getByText('Drop files here or click to browse')).toBeVisible();
   });
 
   test('should allow chat without documents', async ({ page }) => {
@@ -28,8 +28,8 @@ test.describe('Smart Research Assistant - Smoke Tests', () => {
 
   test('should show sidebar with documents section', async ({ page }) => {
     await page.goto('/');
-    await expect(page.getByText('Documents')).toBeVisible();
-    await expect(page.getByText('New Session')).toBeVisible();
+    await expect(page.locator('aside').getByText('Documents', { exact: true })).toBeVisible();
+    await expect(page.locator('aside').getByText('New Session')).toBeVisible();
   });
 
   test('should keep input field visible when scrolling', async ({ page }) => {
@@ -53,7 +53,7 @@ test.describe('Smart Research Assistant - Smoke Tests', () => {
   test('should handle file upload UI', async ({ page }) => {
     await page.goto('/');
     
-    const uploadZone = page.getByText('Drop files here or click to browse');
+    const uploadZone = page.locator('aside').getByText('Drop files here or click to browse');
     await expect(uploadZone).toBeVisible();
     
     // Check that upload zone is clickable

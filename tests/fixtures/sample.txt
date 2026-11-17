@@ -1,0 +1,14 @@
+Smart Research Assistant — sample document for automated tests.
+
+The Apollo program landed twelve astronauts on the Moon between 1969 and 1972.
+Apollo 11 was the first crewed landing: Neil Armstrong and Buzz Aldrin touched
+down in the Sea of Tranquility on July 20, 1969, while Michael Collins remained
+in lunar orbit aboard the command module Columbia.
+
+The program's budget peaked at roughly 4 percent of the United States federal
+budget. Saturn V, the launch vehicle used for the missions, remains the most
+powerful rocket ever flown successfully, standing 111 metres tall.
+
+Later missions added the Lunar Roving Vehicle, extending surface exploration
+range from hundreds of metres to tens of kilometres. Apollo 17 closed the
+program in December 1972 with astronaut-geologist Harrison Schmitt.

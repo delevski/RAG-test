@@ -9,76 +9,73 @@ export const config = {
   },
 }
 
+// Server-side validation — the client checks too, but never trust the client.
+const ALLOWED_EXTENSIONS = new Set(['.pdf', '.doc', '.docx', '.txt'])
+// Note: serverless platforms cap request bodies well below this
+// (Vercel: 4.5 MB), which is a platform limit, not an app limit.
+const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' })
   }
 
   try {
-    // Use /tmp for serverless environments (AWS Lambda, Vercel, etc.)
-    // In serverless, only /tmp is writable
-    const isServerless = process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NOW_REGION
-    
-    // Determine upload directory - prefer /tmp for serverless
-    let uploadDir = isServerless 
+    const isServerless =
+      process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NOW_REGION
+
+    let uploadDir = isServerless
       ? path.join('/tmp', 'uploads')
       : path.join(process.cwd(), 'uploads')
-    
-    // Try to create directory, handle errors gracefully
+
     try {
       if (!fs.existsSync(uploadDir)) {
         fs.mkdirSync(uploadDir, { recursive: true })
       }
     } catch (mkdirError: any) {
-      // If directory creation fails and we're not already using /tmp, try /tmp as fallback
       if (!isServerless && uploadDir !== path.join('/tmp', 'uploads')) {
         const tmpUploadDir = path.join('/tmp', 'uploads')
         try {
           if (!fs.existsSync(tmpUploadDir)) {
             fs.mkdirSync(tmpUploadDir, { recursive: true })
           }
-          uploadDir = tmpUploadDir // Use tmp directory instead
+          uploadDir = tmpUploadDir
         } catch (tmpError) {
           console.error('Failed to create upload directories:', mkdirError, tmpError)
-          return res.status(500).json({ 
+          return res.status(500).json({
             error: 'Failed to initialize upload directory',
-            message: 'Server configuration issue. Please contact support.'
+            message: 'Server configuration issue. Please contact support.',
           })
         }
       } else {
         console.error('Failed to create upload directory:', mkdirError)
-        return res.status(500).json({ 
+        return res.status(500).json({
           error: 'Failed to initialize upload directory',
-          message: 'Server configuration issue. Please contact support.'
+          message: 'Server configuration issue. Please contact support.',
         })
       }
     }
 
-    // Disable default body parsing for formidable
     const form = formidable({
       uploadDir,
       keepExtensions: true,
-      maxFileSize: 50 * 1024 * 1024, // 50MB
-      multiples: true,
+      maxFileSize: MAX_FILE_SIZE,
+      multiples: false,
     })
 
-    // Parse the form - formidable v3 returns a promise
     const parsed = await new Promise<[formidable.Fields, formidable.Files]>((resolve, reject) => {
       form.parse(req, (err, fields, files) => {
         if (err) reject(err)
         else resolve([fields, files])
       })
     })
-    const fields = parsed[0]
     const files = parsed[1]
 
     const file = Array.isArray(files.file) ? files.file[0] : files.file
-
     if (!file) {
       return res.status(400).json({ error: 'No file uploaded' })
     }
 
-    // Handle both old and new formidable API
     const filepath = (file as any).filepath || (file as any).path || ''
     const originalFilename = (file as any).originalFilename || (file as any).name || 'file'
     const size = (file as any).size || 0
@@ -88,15 +85,26 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(400).json({ error: 'Invalid file upload' })
     }
 
+    const ext = path.extname(originalFilename).toLowerCase()
+    if (!ALLOWED_EXTENSIONS.has(ext)) {
+      fs.existsSync(filepath) && fs.unlinkSync(filepath)
+      return res.status(400).json({
+        error: `Unsupported file type "${ext || 'unknown'}". Please upload PDF, DOCX, or TXT files.`,
+      })
+    }
+    if (size > MAX_FILE_SIZE) {
+      fs.existsSync(filepath) && fs.unlinkSync(filepath)
+      return res.status(400).json({
+        error: `File is too large. Maximum size is ${Math.round(MAX_FILE_SIZE / 1024 / 1024)}MB.`,
+      })
+    }
+
     const timestamp = Date.now()
-    const ext = path.extname(originalFilename)
     const baseName = path.basename(originalFilename, ext)
-    // Sanitize filename
-    const sanitizedBase = baseName.replace(/[^a-zA-Z0-9-_]/g, '_')
+    const sanitizedBase = baseName.replace(/[^a-zA-Z0-9-_]/g, '_').slice(0, 80)
     const newFileName = `${timestamp}-${sanitizedBase}${ext}`
     const newPath = path.join(uploadDir, newFileName)
 
-    // Move file to final location
     if (fs.existsSync(filepath)) {
       fs.renameSync(filepath, newPath)
     } else {
@@ -114,10 +122,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     })
   } catch (error: any) {
     console.error('Upload error:', error)
-    console.error('Error stack:', error.stack)
-    res.status(500).json({ 
+    if (error?.code === 1009 || error?.message?.includes('maxFileSize')) {
+      return res.status(400).json({
+        error: `File is too large. Maximum size is ${Math.round(MAX_FILE_SIZE / 1024 / 1024)}MB.`,
+      })
+    }
+    res.status(500).json({
       error: error.message || 'Upload failed',
-      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined,
     })
   }
 }
