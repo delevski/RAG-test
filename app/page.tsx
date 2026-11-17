@@ -185,7 +185,7 @@ export default function HomePage() {
             <h1 className="text-base sm:text-lg font-semibold tracking-tight truncate">
               Smart Research Assistant
             </h1>
-            {process.env.NEXT_PUBLIC_RAG_MOCK === '1' && !anthropicKey && (
+            {process.env.NEXT_PUBLIC_RAG_MOCK === '1' && !anthropicKey && !ownerToken && (
               <span className="inline-flex items-center rounded-full border border-amber-400/40 bg-amber-400/10 px-2.5 py-0.5 text-[10px] font-medium text-amber-300">
                 Demo mode · simulated answers
               </span>
