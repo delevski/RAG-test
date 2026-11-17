@@ -1,5 +1,10 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
 import { validateAnthropicKey } from '@/lib/ai/byok'
+import {
+  resolveClaudeKey,
+  OWNER_MODE_NOT_CONFIGURED,
+  OWNER_TOKEN_INVALID,
+} from '@/lib/ai/ownerKey'
 import { runRagQuery } from '@/lib/langchain/ragChain'
 import { assertValidSessionId, MAX_QUERY_CHARS } from '@/lib/langchain/retriever'
 import { RAG_MOCK_ENABLED, PAID_AI_DISABLED, paidAIAllowed } from '@/lib/ai/mock'
@@ -25,11 +30,12 @@ export const config = {
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') return res.status(405).end('Method not allowed')
-  const { sessionId, query, expectContext, anthropicKey } = req.body as {
+  const { sessionId, query, expectContext, anthropicKey, ownerToken } = req.body as {
     sessionId: string
     query: string
     expectContext?: boolean
     anthropicKey?: unknown
+    ownerToken?: unknown
   }
   try {
     assertValidSessionId(sessionId)
@@ -41,16 +47,29 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(400).end(`Query is limited to ${MAX_QUERY_CHARS} characters`)
   }
 
-  // BYOK: a visitor-supplied Anthropic key is validated in shape only, used
-  // for this single request, and never persisted or logged.
-  let userAnthropicKey: string | undefined
+  // Claude access for this request, in precedence order:
+  // 1. Owner mode: a matching ownerToken unlocks the server-side key (the
+  //    site is public, so the stored key is never spendable without it).
+  //    A wrong token fails loudly - no silent fallback.
+  // 2. BYOK: a visitor-supplied key, shape-validated, used for this single
+  //    request, never persisted or logged.
+  let claude: { key: string; source: 'owner' | 'byok' } | null = null
   try {
-    userAnthropicKey = validateAnthropicKey(anthropicKey) ?? undefined
-  } catch {
+    const resolved = resolveClaudeKey({ ownerToken, anthropicKey })
+    if (resolved.source === 'owner') claude = { key: resolved.key, source: 'owner' }
+    else if (resolved.source === 'byok') {
+      claude = { key: validateAnthropicKey(resolved.key) as string, source: 'byok' }
+    }
+  } catch (err: any) {
+    if (err?.message === OWNER_TOKEN_INVALID) return res.status(403).end('Invalid owner token')
+    if (err?.message?.startsWith('OWNER_MODE_NOT_CONFIGURED')) {
+      return res.status(400).end('Owner mode is not configured on this deployment')
+    }
     return res.status(400).end('Invalid Anthropic API key format')
   }
+  const userAnthropicKey = claude?.key
 
-  if (!userAnthropicKey && !RAG_MOCK_ENABLED) {
+  if (!claude && !RAG_MOCK_ENABLED) {
     if (!paidAIAllowed()) {
       return res.status(400).end(PAID_AI_DISABLED)
     }

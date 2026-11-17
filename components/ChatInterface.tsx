@@ -112,6 +112,7 @@ export default function ChatInterface({
   awaitReady,
   onReindex,
   anthropicKey,
+  ownerToken,
 }: {
   sessionId: string
   docs: DocItem[]
@@ -119,6 +120,8 @@ export default function ChatInterface({
   onReindex: () => Promise<boolean>
   /** Visitor-supplied Claude key, memory-only, sent per request when set. */
   anthropicKey?: string
+  /** Owner passphrase unlocking the server-side key, memory-only. */
+  ownerToken?: string
 }) {
   const hasDocs = useMemo(() => docs.length > 0, [docs])
   const hasReadyDocs = useMemo(() => docs.some((d) => d.status === 'ready'), [docs])
@@ -212,6 +215,7 @@ export default function ChatInterface({
             query: text,
             expectContext: hasReadyDocs,
             ...(anthropicKey ? { anthropicKey } : {}),
+            ...(ownerToken ? { ownerToken } : {}),
           }),
           signal: controller.signal,
         })
@@ -285,7 +289,7 @@ export default function ChatInterface({
         setPhase(null)
       }
     },
-    [input, isStreaming, sessionId, hasReadyDocs, awaitReady, docs, anthropicKey]
+    [input, isStreaming, sessionId, hasReadyDocs, awaitReady, docs, anthropicKey, ownerToken]
   )
 
   const handleReindex = useCallback(async () => {

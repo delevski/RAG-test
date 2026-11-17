@@ -64,6 +64,8 @@ export async function runRagQuery(
       model: process.env.ANTHROPIC_MODEL || 'claude-haiku-5-5',
       temperature: 0.2,
       streaming: true,
+      // Bound each answer's spend; longer answers are simply cut off.
+      maxTokens: 2048,
     })
     const chain = prompt.pipe(llm).pipe(new StringOutputParser())
     const stream = await chain.stream({ context, question: query })
