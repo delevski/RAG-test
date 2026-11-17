@@ -108,3 +108,5 @@ Session bounds: ≤10 documents, ≤1500 chunks, ≤4000-char queries per sessio
 MIT
 
 > Preview branch `redesign-portfolio-upgrade`: persistence runs on Neon (Preview scope only); set `RAG_MOCK=1` for zero-cost demo answers.
+
+> Persistence verified end-to-end on Neon (2026-11-17): upload, grounded query with citations, real delete (no resurrection), cross-deployment durability.
