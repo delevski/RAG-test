@@ -158,7 +158,7 @@ export default function HomePage() {
 
         {/* Mobile files panel */}
         <div
-          className={`flex-1 overflow-y-auto lg:hidden ${mobileTab === 'files' ? '' : 'hidden'}`}
+          className={`flex-1 overflow-y-auto lg:hidden ${mobileTab === 'files' ? 'rise-in' : 'hidden'}`}
         >
           <div className="max-w-xl mx-auto p-4 space-y-4">
             <FileUpload sessionId={sessionId} onComplete={handleUploaded} />

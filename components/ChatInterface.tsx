@@ -1,7 +1,8 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion, AnimatePresence, MotionConfig } from 'framer-motion'
+import ThinkingIndicator, { type ThinkingPhase } from './ThinkingIndicator'
 import type { ChatMessage, Citation, DocItem } from '@/lib/docs'
 import { SOURCES_DELIMITER } from '@/lib/docs'
 import Markdown from './Markdown'
@@ -46,8 +47,13 @@ function Citations({ sources }: { sources: Citation[] }) {
       </div>
       <div className="flex flex-wrap gap-1.5">
         {sources.map((s, i) => (
-          <button
+          <motion.button
             key={`${s.name}-${i}`}
+            initial={{ opacity: 0, y: 6, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            transition={{ delay: 0.07 * i, type: 'spring', stiffness: 380, damping: 24 }}
+            whileHover={{ scale: 1.06 }}
+            whileTap={{ scale: 0.94 }}
             onClick={() => setOpen(open === i ? null : i)}
             className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] transition-colors ${
               open === i
@@ -57,7 +63,7 @@ function Citations({ sources }: { sources: Citation[] }) {
           >
             <FileIcon className="w-3 h-3" />
             <span className="max-w-[180px] truncate">{s.name}</span>
-          </button>
+          </motion.button>
         ))}
       </div>
       <AnimatePresence>
@@ -119,6 +125,8 @@ export default function ChatInterface({
   const [hydrated, setHydrated] = useState(false)
   const [input, setInput] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
+  // What the user is actually waiting on; never a fabricated stage or timer.
+  const [phase, setPhase] = useState<ThinkingPhase | null>(null)
   const [indexMissing, setIndexMissing] = useState(false)
   const [reindexing, setReindexing] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
@@ -177,10 +185,12 @@ export default function ChatInterface({
       const userMsg: ChatMessage = { id: crypto.randomUUID(), role: 'user', content: text }
       setMessages((m) => [...m, userMsg])
       setIsStreaming(true)
+      setPhase(docs.some((d) => d.status === 'indexing') ? 'awaiting-index' : 'connecting')
 
       try {
         // If an upload is still embedding, wait for it so the answer can use it.
         await awaitReady()
+        setPhase('connecting')
 
         const controller = new AbortController()
         abortRef.current = controller
@@ -262,9 +272,10 @@ export default function ChatInterface({
       } finally {
         abortRef.current = null
         setIsStreaming(false)
+        setPhase(null)
       }
     },
-    [input, isStreaming, sessionId, hasReadyDocs, awaitReady]
+    [input, isStreaming, sessionId, hasReadyDocs, awaitReady, docs]
   )
 
   const handleReindex = useCallback(async () => {
@@ -281,6 +292,7 @@ export default function ChatInterface({
   const suggestions = hasDocs ? SUGGESTIONS_WITH_DOCS : SUGGESTIONS_NO_DOCS
 
   return (
+    <MotionConfig reducedMotion="user">
     <div className="h-full flex flex-col relative overflow-hidden">
       {/* Index-missing notice: re-indexing costs API calls, so it's explicit */}
       <AnimatePresence>
@@ -311,39 +323,78 @@ export default function ChatInterface({
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-3xl mx-auto px-4 py-6 space-y-5">
           {showEmptyState ? (
-            <div className="rise-in flex flex-col items-center text-center pt-10 sm:pt-16">
-              <LogoMark className="w-16 h-16" />
-              <h2 className="mt-5 text-2xl sm:text-3xl font-semibold tracking-tight">
+            <div className="flex flex-col items-center text-center pt-10 sm:pt-16">
+              <motion.div
+                className="relative"
+                initial={{ opacity: 0, scale: 0.6, y: 12 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                transition={{ type: 'spring', stiffness: 220, damping: 16 }}
+              >
+                <div
+                  className="logo-halo absolute -inset-4 rounded-full blur-2xl"
+                  style={{
+                    background:
+                      'radial-gradient(circle, rgba(99,102,241,0.4), rgba(34,211,238,0.15) 60%, transparent 75%)',
+                  }}
+                  aria-hidden
+                />
+                <div className="float-y relative">
+                  <LogoMark className="w-16 h-16 drop-shadow-[0_8px_24px_rgba(99,102,241,0.45)]" />
+                </div>
+              </motion.div>
+              <motion.h2
+                className="mt-5 text-2xl sm:text-3xl font-semibold tracking-tight"
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.12, type: 'spring', stiffness: 260, damping: 22 }}
+              >
                 Research, <span className="gradient-text">grounded in your sources</span>
-              </h2>
-              <p className="mt-2.5 text-sm text-dim max-w-md">
+              </motion.h2>
+              <motion.p
+                className="mt-2.5 text-sm text-dim max-w-md"
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.2, type: 'spring', stiffness: 260, damping: 22 }}
+              >
                 Upload PDF, DOCX or TXT files and ask questions — answers are retrieved from your
                 documents with citations, or just chat freely.
-              </p>
+              </motion.p>
               <div className="mt-7 flex flex-wrap justify-center gap-2">
-                {suggestions.map((s) => (
-                  <button
+                {suggestions.map((s, si) => (
+                  <motion.button
                     key={s}
+                    initial={{ opacity: 0, y: 10, scale: 0.94 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    transition={{ delay: 0.28 + 0.08 * si, type: 'spring', stiffness: 320, damping: 22 }}
+                    whileHover={{ scale: 1.05, y: -2 }}
+                    whileTap={{ scale: 0.95 }}
                     onClick={() => void sendMessage(s)}
                     className="rounded-full border border-[var(--border)] bg-white/[0.03] px-3.5 py-1.5 text-xs text-gray-200 hover:border-primary/50 hover:bg-primary/10 transition-colors"
                   >
                     {s}
-                  </button>
+                  </motion.button>
                 ))}
               </div>
-              <div className="mt-10 w-full text-start">
-                <div className="glass rounded-2xl p-4 text-sm text-gray-200 rise-in">
+              <motion.div
+                className="mt-10 w-full text-start"
+                initial={{ opacity: 0, y: 16 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.5, type: 'spring', stiffness: 240, damping: 24 }}
+              >
+                <div className="glass rounded-2xl p-4 text-sm text-gray-200">
                   {messages[0].content}
                 </div>
-              </div>
+              </motion.div>
             </div>
           ) : (
-            messages.map((m) => (
+            <>
+
+              {messages.map((m) => (
               <motion.div
                 key={m.id}
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.25 }}
+                initial={{ opacity: 0, y: 12, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                transition={{ type: 'spring', stiffness: 340, damping: 27 }}
                 className={`flex gap-3 ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}
               >
                 {m.role !== 'user' && (
@@ -363,17 +414,14 @@ export default function ChatInterface({
                   {m.role === 'assistant' || m.role === 'system' ? (
                     <>
                       {m.content ? (
-                        <Markdown>{m.content}</Markdown>
+                        <>
+                          <Markdown>{m.content}</Markdown>
+                          {isStreaming && m.role === 'assistant' && !m.sources && (
+                            <span className="stream-caret" aria-hidden />
+                          )}
+                        </>
                       ) : (
-                        <span className="flex gap-1 py-1" aria-label="Thinking">
-                          {[0, 1, 2].map((i) => (
-                            <span
-                              key={i}
-                              className="typing-dot w-1.5 h-1.5 rounded-full bg-dim"
-                              style={{ animationDelay: `${i * 0.18}s` }}
-                            />
-                          ))}
-                        </span>
+                        <ThinkingIndicator phase={phase ?? 'connecting'} />
                       )}
                       {m.sources && m.sources.length > 0 && <Citations sources={m.sources} />}
                       {m.failed ? (
@@ -402,7 +450,25 @@ export default function ChatInterface({
                   )}
                 </div>
               </motion.div>
-            ))
+              ))}
+              {phase !== null &&
+                !messages.some((x) => x.role === 'assistant' && x.content === '' && !x.sources) && (
+                <motion.div
+                  key="waiting-row"
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0 }}
+                  className="flex gap-3 justify-start"
+                >
+                  <div className="shrink-0 w-7 h-7 rounded-lg gradient-bg flex items-center justify-center text-white mt-0.5">
+                    <SparklesIcon className="w-3.5 h-3.5" />
+                  </div>
+                  <div className="glass rounded-2xl px-4 py-3">
+                    <ThinkingIndicator phase={phase} />
+                  </div>
+                </motion.div>
+              )}
+            </>
           )}
           <div ref={messagesEndRef} />
         </div>
@@ -417,7 +483,7 @@ export default function ChatInterface({
           }}
           className="max-w-3xl mx-auto"
         >
-          <div className="gradient-border rounded-2xl flex items-center gap-2 pl-4 pr-2 py-2">
+          <div className="gradient-border composer-glow rounded-2xl flex items-center gap-2 pl-4 pr-2 py-2 transition-shadow">
             <input
               value={input}
               onChange={(e) => setInput(e.target.value)}
@@ -455,5 +521,6 @@ export default function ChatInterface({
         </form>
       </div>
     </div>
+    </MotionConfig>
   )
 }

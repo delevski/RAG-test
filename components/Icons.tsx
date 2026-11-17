@@ -19,15 +19,29 @@ export function LogoMark({ className }: IconProps) {
       <defs>
         <linearGradient id="lgm" x1="0" y1="0" x2="1" y2="1">
           <stop offset="0" stopColor="#6366f1" />
+          <stop offset="0.55" stopColor="#8b5cf6" />
           <stop offset="1" stopColor="#22d3ee" />
         </linearGradient>
+        <radialGradient id="lgm-glow" cx="0.3" cy="0.2" r="0.9">
+          <stop offset="0" stopColor="#ffffff" stopOpacity="0.22" />
+          <stop offset="0.6" stopColor="#ffffff" stopOpacity="0" />
+        </radialGradient>
       </defs>
-      <rect width="64" height="64" rx="14" fill="url(#lgm)" />
-      <path
-        d="M32 13l4.1 11.4L47.5 28.5l-11.4 4.1L32 44l-4.1-11.4L16.5 28.5l11.4-4.1z"
-        fill="#fff"
+      <rect width="64" height="64" rx="16" fill="url(#lgm)" />
+      <rect width="64" height="64" rx="16" fill="url(#lgm-glow)" />
+      {/* broken orbit ring - the "retrieval" ring around the answer spark */}
+      <circle
+        cx="32" cy="33" r="19"
+        fill="none" stroke="#ffffff" strokeOpacity="0.45" strokeWidth="2.6"
+        strokeLinecap="round" strokeDasharray="74 45.4" transform="rotate(150 32 33)"
       />
-      <circle cx="46" cy="17" r="3" fill="#fff" opacity="0.85" />
+      {/* comet-star: one elongated beam = the grounded answer */}
+      <path
+        d="M32 10c1.4 7.6 2.6 11.4 5.8 15.2 3 3.5 6.2 5 12.2 6.4-6 1.4-9.2 2.9-12.2 6.4-3.2 3.8-4.4 7.6-5.8 15.2-1.4-7.6-2.6-11.4-5.8-15.2-3-3.5-6.2-5-12.2-6.4 6-1.4 9.2-2.9 12.2-6.4C29.4 21.4 30.6 17.6 32 10z"
+        fill="#ffffff"
+      />
+      {/* satellite source dot */}
+      <circle cx="49.5" cy="20" r="3.4" fill="#ffffff" fillOpacity="0.95" />
     </svg>
   )
 }

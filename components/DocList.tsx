@@ -54,17 +54,34 @@ export default function DocList({
                 {d.name}
               </div>
               <div className="text-[10px] text-dim flex items-center gap-1.5 mt-0.5">
-                <span className={`inline-block w-1.5 h-1.5 rounded-full ${STATUS_DOT[d.status]}`} />
+                <motion.span
+                  key={d.status}
+                  initial={{ scale: 0.4, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  transition={{ type: 'spring', stiffness: 500, damping: 18 }}
+                  className={`inline-block w-1.5 h-1.5 rounded-full ${STATUS_DOT[d.status]}`}
+                />
                 {d.status === 'indexing' ? (
                   <span className="flex items-center gap-1">
                     <SpinnerIcon className="w-3 h-3" /> Indexing…
                   </span>
                 ) : (
-                  STATUS_LABEL[d.status]
+                  <motion.span
+                    key={`label-${d.status}`}
+                    initial={{ opacity: 0, y: 3 }}
+                    animate={{ opacity: 1, y: 0 }}
+                  >
+                    {STATUS_LABEL[d.status]}
+                  </motion.span>
                 )}
                 <span aria-hidden>·</span>
                 {formatSize(d.size)}
               </div>
+              {d.status === 'indexing' && (
+                <div className="mt-1.5 h-1 rounded-full bg-[var(--border)] overflow-hidden" aria-hidden>
+                  <span className="shimmer-bar block h-full w-full" />
+                </div>
+              )}
               {d.status === 'error' && d.error && (
                 <div className="text-[10px] text-red-400 mt-1 flex items-start gap-1">
                   <AlertIcon className="w-3 h-3 mt-px shrink-0" />

@@ -142,8 +142,10 @@ export default function FileUpload({
                 <motion.div
                   initial={{ width: 0 }}
                   animate={{ width: `${progress}%` }}
-                  className="h-full gradient-bg rounded-full"
-                />
+                  className="relative h-full gradient-bg rounded-full overflow-hidden"
+                >
+                  <span className="shimmer-bar absolute inset-0" aria-hidden />
+                </motion.div>
               </div>
               <p className="text-[10px] text-dim mt-1 truncate">
                 {currentFile} — {progress}%
