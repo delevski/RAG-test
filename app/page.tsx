@@ -40,19 +40,23 @@ export default function HomePage() {
     setSessionId(id)
     fetch(`/api/docs?session=${encodeURIComponent(id)}`)
       .then((res) => (res.ok ? res.json() : { docs: [] }))
-      .then((data: { docs: Array<{ url: string; name?: string; filename: string }> }) => {
-        if (!Array.isArray(data.docs)) return
-        setDocs((prev) => {
-          if (prev.length > 0) return prev // user already uploaded; server list is stale
-          return data.docs.map((d) => ({
-            id: crypto.randomUUID(),
-            name: d.name ?? d.filename,
-            url: d.url,
-            size: 0,
-            type: '',
-            status: 'ready' as const,
-          }))
-        })
+      .then(
+        (data: {
+          docs: Array<{ url: string; name?: string; filename: string; size?: number; type?: string }>
+        }) => {
+          if (!Array.isArray(data.docs)) return
+          setDocs((prev) => {
+            if (prev.length > 0) return prev // user already uploaded; server list is stale
+            return data.docs.map((d) => ({
+              id: crypto.randomUUID(),
+              name: d.name ?? d.filename,
+              url: d.url,
+              size: d.size ?? 0,
+              type: d.type ?? '',
+              status: 'ready' as const,
+            }))
+          })
+        }
       })
       .catch(() => {
         /* listing failed - the user can re-upload; chat still works */
@@ -68,7 +72,7 @@ export default function HomePage() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               sessionId,
-              docs: items.map((d) => ({ url: d.url, name: d.name })),
+              docs: items.map((d) => ({ url: d.url, name: d.name, size: d.size, type: d.type })),
             }),
           })
           if (!res.ok) {
@@ -274,34 +278,54 @@ function ClaudeKeyPanel({
 }) {
   const [value, setValue] = useState('')
   const valid = value.startsWith('sk-ant-') && value.length >= 20
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 p-4"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-md rounded-2xl border border-[var(--border)] bg-[var(--surface,#14141c)] p-5 space-y-4"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="claude-key-title"
+        className="w-full max-w-md rounded-2xl border border-[var(--border)] bg-[var(--surface,#14141c)] p-5 space-y-4 max-h-[85dvh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold">Use your own Claude key</h2>
-          <button onClick={onClose} className="text-dim hover:text-white text-lg leading-none">
+          <h2 id="claude-key-title" className="text-sm font-semibold">
+            Use your own Claude key
+          </h2>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="text-dim hover:text-white text-lg leading-none"
+          >
             &times;
           </button>
         </div>
         <p className="text-xs text-dim leading-relaxed">
           Enter your Anthropic API key to get real Claude answers instead of the demo.
-          Answers made with your key are billed to your Anthropic account (Claude Haiku:
-          fractions of a cent per answer). Document retrieval in this demo is keyword-based,
-          not semantic embeddings.
+          Anthropic bills that usage to your account at their current rates. Document
+          retrieval in this demo is keyword-based, not semantic embeddings.
         </p>
         <p className="text-xs text-dim leading-relaxed">
           Your key stays in this browser tab only: it is never saved, never stored, and is
           sent only with the question you ask. Closing or refreshing the tab forgets it.
         </p>
+        <label htmlFor="claude-key-input" className="sr-only">
+          Anthropic API key
+        </label>
         <input
+          id="claude-key-input"
           type="password"
           autoComplete="off"
+          autoFocus
           placeholder="sk-ant-..."
           value={value}
           onChange={(e) => setValue(e.target.value.trim())}
