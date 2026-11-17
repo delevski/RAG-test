@@ -185,12 +185,18 @@ export default function ChatInterface({
       const userMsg: ChatMessage = { id: crypto.randomUUID(), role: 'user', content: text }
       setMessages((m) => [...m, userMsg])
       setIsStreaming(true)
-      setPhase(docs.some((d) => d.status === 'indexing') ? 'awaiting-index' : 'connecting')
+      setPhase(
+        docs.some((d) => d.status === 'indexing')
+          ? 'awaiting-index'
+          : hasReadyDocs
+            ? 'connecting-docs'
+            : 'connecting-chat'
+      )
 
       try {
         // If an upload is still embedding, wait for it so the answer can use it.
         await awaitReady()
-        setPhase('connecting')
+        setPhase(hasReadyDocs ? 'connecting-docs' : 'connecting-chat')
 
         const controller = new AbortController()
         abortRef.current = controller
@@ -421,7 +427,7 @@ export default function ChatInterface({
                           )}
                         </>
                       ) : (
-                        <ThinkingIndicator phase={phase ?? 'connecting'} />
+                        <ThinkingIndicator phase={phase ?? (hasReadyDocs ? 'connecting-docs' : 'connecting-chat')} />
                       )}
                       {m.sources && m.sources.length > 0 && <Citations sources={m.sources} />}
                       {m.failed ? (

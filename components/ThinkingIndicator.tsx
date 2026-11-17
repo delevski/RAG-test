@@ -5,14 +5,16 @@ import { motion, AnimatePresence, useReducedMotion } from 'framer-motion'
 /**
  * Real-time waiting indicator. Every phase maps to something the client
  * actually knows - never a fabricated "reasoning" stage or fake timer:
- *   awaiting-index: an upload is still being embedded (we await it)
- *   connecting:     the request was sent; no answer token has arrived yet
+ *   awaiting-index:  an upload is still being embedded (we await it)
+ *   connecting-docs: request sent with indexed documents in play
+ *   connecting-chat: request sent on the plain chat path (no sources claimed)
  */
-export type ThinkingPhase = 'awaiting-index' | 'connecting'
+export type ThinkingPhase = 'awaiting-index' | 'connecting-docs' | 'connecting-chat'
 
 const LABELS: Record<ThinkingPhase, string> = {
   'awaiting-index': 'Waiting for your documents to finish indexing…',
-  connecting: 'Searching your sources and thinking…',
+  'connecting-docs': 'Searching your documents and thinking…',
+  'connecting-chat': 'Thinking…',
 }
 
 export default function ThinkingIndicator({ phase }: { phase: ThinkingPhase }) {
