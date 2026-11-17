@@ -61,7 +61,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       claude = { key: validateAnthropicKey(resolved.key) as string, source: 'byok' }
     }
   } catch (err: any) {
-    if (err?.message === OWNER_TOKEN_INVALID) return res.status(403).end('Invalid owner token')
+    if (err?.message === OWNER_TOKEN_INVALID) {
+      // Uniform small delay: slows online brute force against the token,
+      // and no provider work (spend) ever happens on this path.
+      await new Promise((r) => setTimeout(r, 600))
+      return res.status(403).end('Invalid owner token')
+    }
     if (err?.message?.startsWith('OWNER_MODE_NOT_CONFIGURED')) {
       return res.status(400).end('Owner mode is not configured on this deployment')
     }

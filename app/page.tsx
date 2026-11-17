@@ -335,8 +335,11 @@ function ClaudeKeyPanel({
           Your key stays in this browser tab only: it is never saved, never stored, and is
           sent only with the question you ask. Closing or refreshing the tab forgets it.
         </p>
-        <label htmlFor="claude-key-input" className="sr-only">
-          Anthropic API key
+        <label
+          htmlFor="claude-key-input"
+          className="block text-[10px] font-semibold uppercase tracking-[0.12em] text-dim"
+        >
+          Your Anthropic API key
         </label>
         <input
           id="claude-key-input"
@@ -353,8 +356,11 @@ function ClaudeKeyPanel({
             Site owner? Enter the owner passphrase to answer with the site&rsquo;s own key.
             The passphrase also stays in this tab only.
           </p>
-          <label htmlFor="owner-token-input" className="sr-only">
-            Owner passphrase
+          <label
+            htmlFor="owner-token-input"
+            className="block text-[10px] font-semibold uppercase tracking-[0.12em] text-dim"
+          >
+            Owner passphrase (site owner only)
           </label>
           <input
             id="owner-token-input"

@@ -52,3 +52,13 @@ for (const bad of ['correct-horse-batter', 'correct-horse-battery ', 'Correct-ho
 }
 
 console.log('owner key resolution: all tests passed')
+
+// Weak tokens never arm owner mode, even with a server key present.
+assert.equal(
+  ownerModeConfigured({ ANTHROPIC_API_KEY: 'sk-ant-server-key-000000000', RAG_OWNER_TOKEN: 'short' } as any),
+  false
+)
+assert.throws(
+  () => resolveClaudeKey({ ownerToken: 'short' }, { ANTHROPIC_API_KEY: 'sk-ant-server-key-000000000', RAG_OWNER_TOKEN: 'short' } as any),
+  /OWNER_MODE_NOT_CONFIGURED/
+)

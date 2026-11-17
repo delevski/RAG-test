@@ -12,8 +12,19 @@ export const OWNER_MODE_NOT_CONFIGURED =
   'OWNER_MODE_NOT_CONFIGURED: set ANTHROPIC_API_KEY and RAG_OWNER_TOKEN to enable owner mode'
 export const OWNER_TOKEN_INVALID = 'OWNER_TOKEN_INVALID'
 
+/**
+ * The site is public and Hobby-tier Vercel has no per-route rate limiting,
+ * so the token is the ONLY spend gate. Refuse to arm owner mode with a
+ * weak token: below this length the deployment behaves as unconfigured.
+ */
+export const MIN_OWNER_TOKEN_CHARS = 16
+
 export function ownerModeConfigured(env: NodeJS.ProcessEnv = process.env): boolean {
-  return Boolean(env.ANTHROPIC_API_KEY && env.RAG_OWNER_TOKEN)
+  return Boolean(
+    env.ANTHROPIC_API_KEY &&
+      env.RAG_OWNER_TOKEN &&
+      env.RAG_OWNER_TOKEN.length >= MIN_OWNER_TOKEN_CHARS
+  )
 }
 
 function hash(v: string): Buffer {
