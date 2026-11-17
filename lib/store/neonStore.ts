@@ -4,7 +4,7 @@ import { assertValidSessionId } from './fileStore'
 
 /**
  * Durable driver: Neon serverless Postgres (free tier, no credit card).
- * Activated when POSTGRES_URL / DATABASE_URL is present. The schema is
+ * Activated only when RAG_DATABASE_URL is set explicitly. The schema is
  * created lazily on first use, so a fresh database needs zero manual steps.
  *
  * Embeddings are stored as JSONB arrays and similarity runs in JS at query
@@ -24,7 +24,7 @@ export class NeonSessionStore implements SessionStore {
       this.sql = sqlOverride
     } else {
       // Loaded lazily so the package is only required when the driver is on.
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      // eslint-disable-next-line
       const { neon } = require('@neondatabase/serverless')
       this.sql = neon(url)
     }
