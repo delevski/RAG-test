@@ -19,6 +19,9 @@ export default function HomePage() {
   // never written to localStorage, cookies or the server beyond the single
   // request that uses it. Refreshing the tab forgets it by design.
   const [anthropicKey, setAnthropicKey] = useState('')
+  // Owner mode: the owner's passphrase, also memory-only. When set, the
+  // server uses its own stored key instead of a visitor-entered one.
+  const [ownerToken, setOwnerToken] = useState('')
   const [keyPanelOpen, setKeyPanelOpen] = useState(false)
   // Serializes embedding work; chat waits on it before querying.
   const embedQueue = useRef<Promise<void>>(Promise.resolve())
@@ -182,7 +185,7 @@ export default function HomePage() {
             <h1 className="text-base sm:text-lg font-semibold tracking-tight truncate">
               Smart Research Assistant
             </h1>
-            {process.env.NEXT_PUBLIC_RAG_MOCK === '1' && !anthropicKey && (
+            {process.env.NEXT_PUBLIC_RAG_MOCK === '1' && !anthropicKey && !ownerToken && (
               <span className="inline-flex items-center rounded-full border border-amber-400/40 bg-amber-400/10 px-2.5 py-0.5 text-[10px] font-medium text-amber-300">
                 Demo mode · simulated answers
               </span>
@@ -192,11 +195,16 @@ export default function HomePage() {
                 Claude connected · answers billed to your key
               </span>
             )}
+            {ownerToken && (
+              <span className="inline-flex items-center rounded-full border border-emerald-400/40 bg-emerald-400/10 px-2.5 py-0.5 text-[10px] font-medium text-emerald-300">
+                Owner mode · site&rsquo;s Claude key
+              </span>
+            )}
             <button
               onClick={() => setKeyPanelOpen(true)}
               className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border)] bg-white/[0.03] px-2.5 py-0.5 text-[10px] font-medium text-dim hover:border-primary/50 hover:text-white transition-colors"
             >
-              {anthropicKey ? 'Key settings' : 'Use your Claude key'}
+              {anthropicKey || ownerToken ? 'Key settings' : 'Use your Claude key'}
             </button>
             <span
               className={`hidden sm:inline-flex items-center rounded-full border px-2.5 py-0.5 text-[10px] font-medium ${
@@ -228,6 +236,7 @@ export default function HomePage() {
             awaitReady={awaitReady}
             onReindex={handleReindex}
             anthropicKey={anthropicKey || undefined}
+            ownerToken={ownerToken || undefined}
           />
         </div>
 
@@ -250,12 +259,15 @@ export default function HomePage() {
       {keyPanelOpen && (
         <ClaudeKeyPanel
           currentKey={anthropicKey}
-          onSave={(k) => {
+          currentOwnerToken={ownerToken}
+          onSave={(k, t) => {
             setAnthropicKey(k)
+            setOwnerToken(t)
             setKeyPanelOpen(false)
           }}
           onClear={() => {
             setAnthropicKey('')
+            setOwnerToken('')
             setKeyPanelOpen(false)
           }}
           onClose={() => setKeyPanelOpen(false)}
@@ -267,17 +279,22 @@ export default function HomePage() {
 
 function ClaudeKeyPanel({
   currentKey,
+  currentOwnerToken,
   onSave,
   onClear,
   onClose,
 }: {
   currentKey: string
-  onSave: (key: string) => void
+  currentOwnerToken: string
+  onSave: (key: string, ownerToken: string) => void
   onClear: () => void
   onClose: () => void
 }) {
   const [value, setValue] = useState('')
-  const valid = value.startsWith('sk-ant-') && value.length >= 20
+  const [ownerValue, setOwnerValue] = useState('')
+  const keyValid = value.startsWith('sk-ant-') && value.length >= 20
+  const ownerValid = ownerValue.length >= 8
+  const valid = ownerValue.length > 0 ? ownerValid : keyValid
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose()
@@ -318,8 +335,11 @@ function ClaudeKeyPanel({
           Your key stays in this browser tab only: it is never saved, never stored, and is
           sent only with the question you ask. Closing or refreshing the tab forgets it.
         </p>
-        <label htmlFor="claude-key-input" className="sr-only">
-          Anthropic API key
+        <label
+          htmlFor="claude-key-input"
+          className="block text-[10px] font-semibold uppercase tracking-[0.12em] text-dim"
+        >
+          Your Anthropic API key
         </label>
         <input
           id="claude-key-input"
@@ -331,8 +351,29 @@ function ClaudeKeyPanel({
           onChange={(e) => setValue(e.target.value.trim())}
           className="w-full rounded-lg border border-[var(--border)] bg-white/[0.03] px-3 py-2 text-sm outline-none focus:border-primary/60"
         />
+        <div className="border-t border-[var(--border)] pt-3 space-y-2">
+          <p className="text-xs text-dim leading-relaxed">
+            Site owner? Enter the owner passphrase to answer with the site&rsquo;s own key.
+            The passphrase also stays in this tab only.
+          </p>
+          <label
+            htmlFor="owner-token-input"
+            className="block text-[10px] font-semibold uppercase tracking-[0.12em] text-dim"
+          >
+            Owner passphrase (site owner only)
+          </label>
+          <input
+            id="owner-token-input"
+            type="password"
+            autoComplete="off"
+            placeholder="Owner passphrase"
+            value={ownerValue}
+            onChange={(e) => setOwnerValue(e.target.value.trim())}
+            className="w-full rounded-lg border border-[var(--border)] bg-white/[0.03] px-3 py-2 text-sm outline-none focus:border-primary/60"
+          />
+        </div>
         <div className="flex items-center justify-end gap-2">
-          {currentKey && (
+          {(currentKey || currentOwnerToken) && (
             <button
               onClick={onClear}
               className="rounded-lg border border-red-400/40 px-3 py-1.5 text-xs text-red-300 hover:bg-red-400/10"
@@ -342,7 +383,7 @@ function ClaudeKeyPanel({
           )}
           <button
             disabled={!valid}
-            onClick={() => onSave(value)}
+            onClick={() => onSave(ownerValue.length > 0 ? '' : value, ownerValue)}
             className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-white disabled:opacity-40"
           >
             Connect for this tab

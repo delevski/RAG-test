@@ -75,4 +75,15 @@ const sessionId = randomUUID()
   assert.equal(res.statusCode, 400)
 }
 
+// 7. Owner token on an unconfigured deployment -> 400, no provider work.
+{
+  const res = fakeRes()
+  await handler(
+    { method: 'POST', body: { sessionId, query: 'hi', ownerToken: 'whatever' } },
+    res
+  )
+  assert.equal(res.statusCode, 400)
+  assert.match(res.body, /Owner mode is not configured/)
+}
+
 console.log('query handler integration: all tests passed')
