@@ -57,7 +57,7 @@ export default function HomePage() {
             }))
           })
         }
-      })
+      )
       .catch(() => {
         /* listing failed - the user can re-upload; chat still works */
       })
