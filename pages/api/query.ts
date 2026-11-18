@@ -15,6 +15,7 @@ import {
   sanitizeConversationId,
   noteFromUserMessage,
   selectNotes,
+  BRAIN_MEMORY_NOTICE,
   formatNotes,
   MAX_NOTES,
   BRAIN_FORBIDDEN,
@@ -39,10 +40,6 @@ export const config = {
     },
   },
 }
-
-/** Tells the model memory really is on, so it never claims it cannot remember across chats. */
-const BRAIN_MEMORY_NOTICE =
-  '(Memory is ON: statements the user makes are saved as notes and kept for future conversations. Only a selection of the saved notes is shown below, so a fact may be missing if it was deleted or not selected. Do not claim you cannot remember across conversations; answer from the notes shown, and say so plainly if the answer is not among them.)'
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') return res.status(405).end('Method not allowed')
@@ -115,6 +112,34 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   res.setHeader('Content-Type', 'text/plain; charset=utf-8')
   res.setHeader('Transfer-Encoding', 'chunked')
 
+  // Observability: counts and timings only, never question/answer/note text.
+  const startedAt = Date.now()
+  let notesTotal = 0
+  let notesSent = 0
+  let historyTurns = 0
+  let answerChars = 0
+  const record = async (ok: boolean, error?: string) => {
+    if (!brain) return
+    try {
+      const store = await getSessionStore()
+      await store.addEvent(sessionId, {
+        ts: new Date().toISOString(),
+        provider: RAG_MOCK_ENABLED ? 'mock' : 'claude',
+        ok,
+        ms: Date.now() - startedAt,
+        notesTotal,
+        notesSent,
+        notesOmitted: Math.max(0, notesTotal - notesSent),
+        historyTurns,
+        questionChars: query.length,
+        answerChars,
+        ...(error ? { error } : {}),
+      })
+    } catch (e: any) {
+      console.error('event log error', e?.message ?? e)
+    }
+  }
+
   try {
     let answerText = ''
     let notesText = '(none)'
@@ -122,9 +147,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const store = await getSessionStore()
       const all = await store.listNotes(sessionId)
       const chosen = selectNotes(all, query)
+      notesTotal = all.length
+      notesSent = chosen.length
       notesText =
         BRAIN_MEMORY_NOTICE + '\n' + formatNotes(chosen, all.length - chosen.length)
     }
+    historyTurns = sanitizeHistory(history).length
     const { sources } = await runRagQuery(
       sessionId,
       query,
@@ -141,6 +169,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         notes: notesText,
       }
     )
+    answerChars = answerText.length
+    await record(true)
     if (brain) {
       // Save the finished turn: chat history (per conversation) and, for a
       // statement, a memory note. A storage hiccup must never turn a good
@@ -168,6 +198,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
     res.end()
   } catch (err: any) {
+    await record(false, String(err?.message ?? 'error').split(':')[0].slice(0, 40))
     if (err?.message === 'INDEX_MISSING') {
       // The index lived in /tmp of a different instance. Re-indexing spends
       // the API key, so the client must ask the user first.

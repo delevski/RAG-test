@@ -226,4 +226,22 @@ export class FileSessionStore implements SessionStore {
     await this.writeNotes(sessionId, left)
     return true
   }
+
+  async addEvent(sessionId: string, event: import('@/lib/events').RagEvent): Promise<void> {
+    const file = path.join(sessionDataDir(sessionId), 'events.json')
+    let all: any[] = []
+    try { all = JSON.parse(await fs.promises.readFile(file, 'utf8')) } catch { /* first event */ }
+    all.push(event)
+    await fs.promises.mkdir(sessionDataDir(sessionId), { recursive: true })
+    await fs.promises.writeFile(file, JSON.stringify(all.slice(-500)), 'utf8')
+  }
+
+  async listEvents(sessionId: string, limit: number): Promise<import('@/lib/events').RagEvent[]> {
+    try {
+      const all = JSON.parse(await fs.promises.readFile(path.join(sessionDataDir(sessionId), 'events.json'), 'utf8'))
+      return all.slice(-limit)
+    } catch {
+      return []
+    }
+  }
 }

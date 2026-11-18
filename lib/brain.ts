@@ -180,3 +180,8 @@ export async function guardBrain(req: any, res: any): Promise<boolean> {
     return false
   }
 }
+
+/** Tells the model memory really is on, so it never claims it cannot remember across chats. */
+export const BRAIN_MEMORY_NOTICE =
+  '(Memory is ON: statements the user makes are saved as notes and kept for future conversations. Only a selection of the saved notes is shown below, so a fact may be missing if it was deleted or not selected. Do not claim you cannot remember across conversations; answer from the notes shown, and say so plainly if the answer is not among them.)'
+

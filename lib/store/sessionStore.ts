@@ -77,6 +77,9 @@ export interface SessionStore {
    * reply directly after each. Returns how many messages were removed.
    */
   scrubStatement(sessionId: string, text: string): Promise<number>
+  /** Counts-and-timings only request log (see lib/events.ts). Newest last. */
+  addEvent(sessionId: string, event: import('@/lib/events').RagEvent): Promise<void>
+  listEvents(sessionId: string, limit: number): Promise<import('@/lib/events').RagEvent[]>
 }
 
 let active: SessionStore | null = null

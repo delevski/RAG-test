@@ -79,6 +79,13 @@ export class NeonSessionStore implements SessionStore {
           created_at timestamptz NOT NULL DEFAULT now()
         )`
         await this.sql`CREATE INDEX IF NOT EXISTS rag_notes_session_idx ON rag_notes (session_id, id)`
+        await this.sql`CREATE TABLE IF NOT EXISTS rag_events (
+          id bigserial PRIMARY KEY,
+          session_id text NOT NULL,
+          created_at timestamptz NOT NULL DEFAULT now(),
+          event jsonb NOT NULL
+        )`
+        await this.sql`CREATE INDEX IF NOT EXISTS rag_events_session_idx ON rag_events (session_id, id)`
         await this.sql`CREATE TABLE IF NOT EXISTS rag_files (
           session_id text NOT NULL,
           filename text NOT NULL,
@@ -311,5 +318,23 @@ export class NeonSessionStore implements SessionStore {
     const rows = await this.sql`
       DELETE FROM rag_notes WHERE session_id = ${sessionId} AND id = ${noteId}::bigint RETURNING id`
     return rows.length > 0
+  }
+
+  async addEvent(sessionId: string, event: import('@/lib/events').RagEvent): Promise<void> {
+    assertValidSessionId(sessionId)
+    await this.ensureSchema()
+    await this.sql`INSERT INTO rag_events (session_id, event) VALUES (${sessionId}, ${JSON.stringify(event)}::jsonb)`
+    // Keep the log small: only the newest 500 events per session.
+    await this.sql`DELETE FROM rag_events WHERE session_id = ${sessionId} AND id <= (
+      SELECT COALESCE(MAX(id), 0) - 500 FROM rag_events WHERE session_id = ${sessionId})`
+  }
+
+  async listEvents(sessionId: string, limit: number): Promise<import('@/lib/events').RagEvent[]> {
+    assertValidSessionId(sessionId)
+    await this.ensureSchema()
+    const rows = await this.sql`
+      SELECT event FROM (SELECT id, event FROM rag_events WHERE session_id = ${sessionId}
+        ORDER BY id DESC LIMIT ${limit}) t ORDER BY id ASC`
+    return rows.map((r: any) => (typeof r.event === 'string' ? JSON.parse(r.event) : r.event))
   }
 }
