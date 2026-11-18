@@ -42,7 +42,7 @@ export const config = {
 
 /** Tells the model memory really is on, so it never claims it cannot remember across chats. */
 const BRAIN_MEMORY_NOTICE =
-  '(Memory is ON: every statement the user makes is saved automatically as a note and is available in all future conversations. Never say you cannot remember across conversations. The notes below are what is saved so far.)'
+  '(Memory is ON: statements the user makes are saved as notes and kept for future conversations. Only a selection of the saved notes is shown below, so a fact may be missing if it was deleted or not selected. Do not claim you cannot remember across conversations; answer from the notes shown, and say so plainly if the answer is not among them.)'
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') return res.status(405).end('Method not allowed')
