@@ -478,7 +478,7 @@ function ClaudeKeyPanel({
         <div className="border-t border-[var(--border)] pt-3 space-y-2">
           <p className="text-xs text-dim leading-relaxed">
             Site owner? Enter the owner passphrase to answer with the site&rsquo;s own key.
-            After the first login this browser stays logged in for 30 days; the passphrase itself is not stored. "Clear" logs out.
+            After the first login this browser stays logged in for 30 days; the passphrase itself is not stored. &quot;Clear&quot; logs out.
           </p>
           <label
             htmlFor="owner-token-input"
