@@ -42,31 +42,15 @@ function storageKey(sessionId: string) {
 
 function Citations({ sources }: { sources: Citation[] }) {
   const [open, setOpen] = useState<number | null>(null)
-  // One chip per document. Several retrieved passages from the same file are
-  // all kept (shown on tap), not repeated as identical chips.
-  // Identity is the stored-file key when present (two uploads with the same
-  // name but different files stay separate), else the name.
-  const groups: { id: string; name: string; label: string; passages: string[] }[] = []
-  for (const s of sources) {
-    const id = (s as any).docKey ?? s.name
-    const g = groups.find((x) => x.id === id)
-    if (g) g.passages.push(s.snippet)
-    else groups.push({ id, name: s.name, label: s.name, passages: [s.snippet] })
-  }
-  // Same visible name, different files: number them so they are distinguishable.
-  const byName: Record<string, number> = {}
-  for (const g of groups) byName[g.name] = (byName[g.name] ?? 0) + 1
-  const seenN: Record<string, number> = {}
-  for (const g of groups) if (byName[g.name] > 1) g.label = `${g.name} (${(seenN[g.name] = (seenN[g.name] ?? 0) + 1)})`
   return (
     <div className="mt-2.5 pt-2.5 border-t border-[var(--border)]">
       <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-dim mb-1.5">
         Sources
       </div>
       <div className="flex flex-wrap gap-1.5">
-        {groups.map((g, i) => (
+        {sources.map((s, i) => (
           <motion.button
-            key={`${g.name}-${i}`}
+            key={`${s.name}-${i}`}
             initial={{ opacity: 0, y: 6, scale: 0.9 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             transition={{ delay: 0.07 * i, type: 'spring', stiffness: 380, damping: 24 }}
@@ -80,29 +64,21 @@ function Citations({ sources }: { sources: Citation[] }) {
             }`}
           >
             <FileIcon className="w-3 h-3" />
-            <span className="max-w-[180px] truncate">{g.label}</span>
-            {g.passages.length > 1 && (
-              <span className="rounded-full bg-white/10 px-1.5 text-[10px] text-white/80">
-                {g.passages.length} passages
-              </span>
-            )}
+            <span className="max-w-[180px] truncate">{s.name}</span>
           </motion.button>
         ))}
       </div>
       <AnimatePresence>
-        {open !== null && groups[open] && (
+        {open !== null && sources[open] && (
           <motion.div
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: 'auto' }}
             exit={{ opacity: 0, height: 0 }}
             className="overflow-hidden"
           >
-            {groups[open].passages.map((t, k) => (
-              <blockquote key={k} className="mt-2 text-[11px] leading-relaxed text-dim border-l-2 border-primary/60 pl-3">
-                {groups[open].passages.length > 1 && <span className="text-white/60">Passage {k + 1}: </span>}
-                {t}…
-              </blockquote>
-            ))}
+            <blockquote className="mt-2 text-[11px] leading-relaxed text-dim border-l-2 border-primary/60 pl-3">
+              {sources[open].snippet}…
+            </blockquote>
           </motion.div>
         )}
       </AnimatePresence>

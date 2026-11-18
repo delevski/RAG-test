@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto'
 import { ChatOpenAI } from '@langchain/openai'
 import { ChatAnthropic } from '@langchain/anthropic'
 import { StringOutputParser } from '@langchain/core/output_parsers'
@@ -41,8 +40,6 @@ class TextOnlyOutputParser extends StringOutputParser {
 export type SourceCitation = {
   name: string
   snippet: string
-  /** Short hash of the stored file location: tells two uploads with the same file name apart. */
-  docKey?: string
 }
 
 export type RagResult = {
@@ -91,12 +88,10 @@ export async function runRagQuery(
       const seen = new Set<string>()
       for (const d of retrieved) {
         const name = (d.metadata as any)?.docName || 'Document'
-        const url = (d.metadata as any)?.docUrl
-        const docKey = url ? createHash('sha1').update(String(url)).digest('hex').slice(0, 8) : undefined
-        const key = `${docKey ?? name}::${d.pageContent.slice(0, 80)}`
+        const key = `${name}::${d.pageContent.slice(0, 80)}`
         if (seen.has(key)) continue
         seen.add(key)
-        sources.push({ name, docKey, snippet: d.pageContent.replace(/\s+/g, ' ').slice(0, 220) })
+        sources.push({ name, snippet: d.pageContent.replace(/\s+/g, ' ').slice(0, 220) })
       }
     }
   }
