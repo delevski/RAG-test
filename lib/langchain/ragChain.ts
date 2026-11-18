@@ -62,15 +62,21 @@ export async function runRagQuery(
     const llm = new ChatAnthropic({
       apiKey: opts.anthropicKey,
       model: process.env.ANTHROPIC_MODEL || 'claude-haiku-5-5',
-      temperature: 0.2,
       streaming: true,
       // Bound each answer's spend; longer answers are simply cut off.
       maxTokens: 2048,
-      // @langchain/anthropic 0.3.x defaults topP/topK to -1 and always sends
-      // them; current Claude models reject `top_p: -1` with a 400 (production
-      // log req_011ChA1BnQNTQADW24LrRPFm). Override to undefined so the
-      // serialized request omits both (undefined keys drop out of JSON).
-      invocationKwargs: { top_p: undefined, top_k: undefined },
+      // Current Claude models reject sampling params entirely: `top_p: -1`
+      // (langchain 0.3.x default, production log req_011ChA1BnQNTQADW24LrRPFm)
+      // and even an explicit `temperature` (400 "deprecated for this model",
+      // req_011ChA3HhXq5Hw16wkjrFeuW). Omit all three, plus the langchain
+      // default `thinking` block, so the serialized request carries only
+      // required fields: undefined keys drop out of the JSON.
+      invocationKwargs: {
+        temperature: undefined,
+        top_p: undefined,
+        top_k: undefined,
+        thinking: undefined,
+      },
     })
     const chain = prompt.pipe(llm).pipe(new StringOutputParser())
     const stream = await chain.stream({ context, question: query })
