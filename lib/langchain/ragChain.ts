@@ -66,6 +66,11 @@ export async function runRagQuery(
       streaming: true,
       // Bound each answer's spend; longer answers are simply cut off.
       maxTokens: 2048,
+      // @langchain/anthropic 0.3.x defaults topP/topK to -1 and always sends
+      // them; current Claude models reject `top_p: -1` with a 400 (production
+      // log req_011ChA1BnQNTQADW24LrRPFm). Override to undefined so the
+      // serialized request omits both (undefined keys drop out of JSON).
+      invocationKwargs: { top_p: undefined, top_k: undefined },
     })
     const chain = prompt.pipe(llm).pipe(new StringOutputParser())
     const stream = await chain.stream({ context, question: query })
