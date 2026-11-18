@@ -1,5 +1,6 @@
 import type { NextApiRequest } from 'next'
 import { ownerModeConfigured, ownerTokenMatches } from '@/lib/ai/ownerKey'
+import { resolveOwnerCredential } from '@/lib/ownerSession'
 
 /**
  * Second brain: ONE reserved, owner-only knowledge space.
@@ -26,9 +27,9 @@ export function isBrainSession(sessionId: unknown): boolean {
 
 export function brainTokenFromRequest(req: Pick<NextApiRequest, 'headers' | 'body'>): unknown {
   const h = req.headers?.['x-owner-token']
-  if (typeof h === 'string' && h.length > 0) return h
+  if (typeof h === 'string' && h.length > 0) return resolveOwnerCredential(req, h)
   const b = (req.body as any)?.ownerToken
-  return typeof b === 'string' ? b : undefined
+  return typeof b === 'string' ? resolveOwnerCredential(req, b) : undefined
 }
 
 /** Throws BRAIN_FORBIDDEN unless `sessionId` is a normal session or the owner proved ownership. */
