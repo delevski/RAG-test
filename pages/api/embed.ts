@@ -49,6 +49,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     console.error('embed error', err)
 
     if (err?.message === BRAIN_FORBIDDEN) {
+      await new Promise((r) => setTimeout(r, 600))
       return res.status(403).json({ error: 'Owner passphrase required' })
     }
     if (err?.message === 'Invalid sessionId') {

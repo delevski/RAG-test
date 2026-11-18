@@ -6,8 +6,19 @@ import {
   OWNER_TOKEN_INVALID,
 } from '@/lib/ai/ownerKey'
 import { runRagQuery } from '@/lib/langchain/ragChain'
-import { assertValidSessionId, MAX_QUERY_CHARS, rememberTurn } from '@/lib/langchain/retriever'
-import { assertBrainAccess, isBrainSession, sanitizeHistory, BRAIN_FORBIDDEN } from '@/lib/brain'
+import { assertValidSessionId, MAX_QUERY_CHARS } from '@/lib/langchain/retriever'
+import { getSessionStore } from '@/lib/store/sessionStore'
+import {
+  assertBrainAccess,
+  isBrainSession,
+  sanitizeHistory,
+  sanitizeConversationId,
+  noteFromUserMessage,
+  selectNotes,
+  formatNotes,
+  MAX_NOTES,
+  BRAIN_FORBIDDEN,
+} from '@/lib/brain'
 import { RAG_MOCK_ENABLED, PAID_AI_DISABLED, paidAIAllowed } from '@/lib/ai/mock'
 
 /**
@@ -31,13 +42,14 @@ export const config = {
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') return res.status(405).end('Method not allowed')
-  const { sessionId, query, expectContext, anthropicKey, ownerToken, history } = req.body as {
+  const { sessionId, query, expectContext, anthropicKey, ownerToken, history, conversationId } = req.body as {
     sessionId: string
     query: string
     expectContext?: boolean
     anthropicKey?: unknown
     ownerToken?: unknown
     history?: unknown
+    conversationId?: unknown
   }
   try {
     assertValidSessionId(sessionId)
@@ -101,6 +113,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   try {
     let answerText = ''
+    let notesText = '(none)'
+    if (brain) {
+      const store = await getSessionStore()
+      notesText = formatNotes(selectNotes(await store.listNotes(sessionId), query))
+    }
     const { sources } = await runRagQuery(
       sessionId,
       query,
@@ -114,13 +131,27 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         allowEmptyIndex: brain,
         anthropicKey: userAnthropicKey,
         history: sanitizeHistory(history),
+        notes: notesText,
       }
     )
     if (brain) {
-      // Remember the finished turn. A storage hiccup must never turn a
-      // good answer into an error, so it is logged and swallowed.
+      // Save the finished turn: chat history (per conversation) and, for a
+      // statement, a memory note. A storage hiccup must never turn a good
+      // answer into an error, so it is logged and swallowed.
       try {
-        await rememberTurn(sessionId, { user: query, assistant: answerText, sources })
+        const store = await getSessionStore()
+        const ts = new Date().toISOString()
+        await store.appendMessages(sessionId, sanitizeConversationId(conversationId), [
+          { role: 'user', content: query.slice(0, MAX_QUERY_CHARS), ts },
+          { role: 'assistant', content: answerText.slice(0, 20000), ts, sources },
+        ])
+        const note = noteFromUserMessage(query)
+        if (note) {
+          const existing = await store.listNotes(sessionId)
+          if (existing.length < MAX_NOTES && !existing.some((n) => n.text === note)) {
+            await store.addNote(sessionId, note)
+          }
+        }
       } catch (e: any) {
         console.error('brain remember error', e?.message ?? e)
       }

@@ -116,6 +116,8 @@ export default function ChatInterface({
   anthropicKey,
   ownerToken,
   brain = false,
+  conversationId,
+  onTurnDone,
 }: {
   sessionId: string
   docs: DocItem[]
@@ -127,6 +129,10 @@ export default function ChatInterface({
   ownerToken?: string
   /** Second-brain mode: history lives on the server, not in this browser. */
   brain?: boolean
+  /** Second brain: which saved conversation this chat belongs to. */
+  conversationId?: string
+  /** Fires after an answer finished and was saved (lets side panels refresh). */
+  onTurnDone?: () => void
 }) {
   const hasDocs = useMemo(() => docs.length > 0, [docs])
   const hasReadyDocs = useMemo(() => docs.some((d) => d.status === 'ready'), [docs])
@@ -154,7 +160,9 @@ export default function ChatInterface({
   useEffect(() => {
     if (brain) {
       let cancelled = false
-      fetch('/api/brain', { headers: ownerToken ? { 'x-owner-token': ownerToken } : {} })
+      fetch(`/api/brain/conversations?id=${encodeURIComponent(conversationId ?? 'default')}`, {
+        headers: ownerToken ? { 'x-owner-token': ownerToken } : {},
+      })
         .then((r) => (r.ok ? r.json() : { messages: [] }))
         .then((d: { messages?: Array<{ role: 'user' | 'assistant'; content: string; sources?: Citation[] }> }) => {
           if (cancelled || !Array.isArray(d.messages) || d.messages.length === 0) return
@@ -188,7 +196,7 @@ export default function ChatInterface({
       /* corrupted storage - start fresh */
     }
     setHydrated(true)
-  }, [sessionId, brain, ownerToken])
+  }, [sessionId, brain, ownerToken, conversationId])
 
   useEffect(() => {
     if (!hydrated || brain) return
@@ -249,6 +257,7 @@ export default function ChatInterface({
             sessionId,
             query: text,
             expectContext: hasReadyDocs,
+            ...(brain && conversationId ? { conversationId } : {}),
             // Earlier turns of this chat, so follow-ups and facts just told resolve.
             history: messagesRef.current
               .filter((x) => x.id !== userMsg.id && (x.role === 'user' || x.role === 'assistant') && !x.failed && x.content.trim().length > 0)
@@ -303,6 +312,7 @@ export default function ChatInterface({
         setMessages((m) =>
           m.map((x) => (x.id === assistantId ? { ...x, content: finalContent, sources } : x))
         )
+        onTurnDone?.()
       } catch (err: any) {
         if (err?.name === 'AbortError') {
           setMessages((m) =>
@@ -329,7 +339,7 @@ export default function ChatInterface({
         setPhase(null)
       }
     },
-    [input, isStreaming, sessionId, hasReadyDocs, awaitReady, docs, anthropicKey, ownerToken]
+    [input, isStreaming, sessionId, hasReadyDocs, awaitReady, docs, anthropicKey, ownerToken, brain, conversationId, onTurnDone]
   )
 
   const handleReindex = useCallback(async () => {

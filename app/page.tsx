@@ -9,6 +9,7 @@ import MobileNav, { type MobileTab } from '@/components/MobileNav'
 import type { DocItem } from '@/lib/docs'
 import { PlusIcon } from '@/components/Icons'
 import { BRAIN_SESSION_ID } from '@/lib/brainId'
+import BrainPanel from '@/components/BrainPanel'
 
 export default function HomePage() {
   // Empty until mounted: the id comes from localStorage, so SSR and the
@@ -28,6 +29,11 @@ export default function HomePage() {
   // never see it: the server rejects its id without the owner passphrase.
   const brain = Boolean(ownerToken)
   const sessionId = brain ? BRAIN_SESSION_ID : localSession
+  // Second brain conversations: knowledge is shared, chats are separate. The
+  // active conversation id lives in memory only (nothing brain-related is
+  // written to localStorage). null = still resolving on connect.
+  const [brainConv, setBrainConv] = useState<string | null>(null)
+  const [brainRefresh, setBrainRefresh] = useState(0)
   const authHeaders = useMemo(() => {
     const h: Record<string, string> = {}
     if (ownerToken) h['x-owner-token'] = ownerToken
@@ -51,6 +57,47 @@ export default function HomePage() {
     }
     setLocalSession(id)
   }, [])
+
+  // On connect, resume the most recent saved conversation (or start a new one).
+  useEffect(() => {
+    if (!ownerToken) {
+      setBrainConv(null)
+      return
+    }
+    let cancelled = false
+    fetch('/api/brain/conversations', { headers: { 'x-owner-token': ownerToken } })
+      .then((r) => (r.ok ? r.json() : { conversations: [] }))
+      .then((d: { conversations?: Array<{ id: string }> }) => {
+        if (!cancelled) setBrainConv(d.conversations?.[0]?.id ?? crypto.randomUUID())
+      })
+      .catch(() => {
+        if (!cancelled) setBrainConv(crypto.randomUUID())
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [ownerToken])
+
+  // Open a stored original: header-authorized fetch -> blob, so the passphrase
+  // never travels in a URL.
+  const handleOpenDoc = useCallback(
+    async (doc: DocItem) => {
+      const win = window.open('', '_blank')
+      try {
+        const res = await fetch(doc.url, { headers: authHeaders })
+        if (!res.ok) throw new Error(String(res.status))
+        const blob = await res.blob()
+        const href = URL.createObjectURL(blob)
+        if (win) win.location.href = href
+        else window.location.href = href
+        setTimeout(() => URL.revokeObjectURL(href), 5 * 60 * 1000)
+      } catch {
+        win?.close()
+        window.alert('Could not open this file.')
+      }
+    },
+    [authHeaders]
+  )
 
   // Load the active space's document list: the visitor's own session, or the
   // owner's second brain once the passphrase is connected. Documents still
@@ -188,9 +235,27 @@ export default function HomePage() {
 
   const readyCount = docs.filter((d) => d.status === 'ready').length
 
-  if (!sessionId) {
+  if (!sessionId || (brain && brainConv === null)) {
     return <div className="h-dvh app-bg" aria-busy="true" />
   }
+
+  const brainPanel =
+    brain && brainConv ? (
+      <BrainPanel
+        ownerToken={ownerToken}
+        conversationId={brainConv}
+        refreshKey={brainRefresh}
+        onSelect={(id) => {
+          setBrainConv(id)
+          setMobileTab('chat')
+        }}
+        onNew={() => {
+          setBrainConv(crypto.randomUUID())
+          setMobileTab('chat')
+        }}
+        onDeletedActive={() => setBrainConv(crypto.randomUUID())}
+      />
+    ) : null
 
   return (
     <div className="h-dvh app-bg">
@@ -203,6 +268,8 @@ export default function HomePage() {
         onRetryDoc={handleRetryDoc}
         ownerToken={ownerToken || undefined}
         brain={brain}
+        onOpenDoc={brain ? handleOpenDoc : undefined}
+        brainPanel={brainPanel}
       />
 
       <main className="h-dvh flex flex-col lg:ml-[320px] pb-[64px] lg:pb-0">
@@ -245,8 +312,7 @@ export default function HomePage() {
             </span>
           </div>
           <button
-            onClick={handleNewSession}
-            hidden={brain}
+            onClick={brain ? () => setBrainConv(crypto.randomUUID()) : handleNewSession}
             className="lg:hidden shrink-0 flex items-center gap-1.5 rounded-lg border border-[var(--border)] px-2.5 py-1.5 text-xs text-gray-200 hover:border-primary/50 transition-colors"
           >
             <PlusIcon className="w-3.5 h-3.5" />
@@ -257,7 +323,9 @@ export default function HomePage() {
         {/* Chat panel */}
         <div className={`flex-1 overflow-hidden ${mobileTab === 'chat' ? '' : 'hidden lg:block'}`}>
           <ChatInterface
-            key={sessionId}
+            key={`${sessionId}:${brainConv ?? ''}`}
+            conversationId={brain ? brainConv ?? undefined : undefined}
+            onTurnDone={() => setBrainRefresh((n) => n + 1)}
             sessionId={sessionId}
             docs={docs}
             awaitReady={awaitReady}
@@ -277,7 +345,8 @@ export default function HomePage() {
             <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-dim">
               Documents
             </div>
-            <DocList docs={docs} onRemove={handleRemoveDoc} onRetry={handleRetryDoc} />
+            <DocList docs={docs} onRemove={handleRemoveDoc} onRetry={handleRetryDoc} onOpen={brain ? handleOpenDoc : undefined} />
+            {brainPanel}
           </div>
         </div>
       </main>

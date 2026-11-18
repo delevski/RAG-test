@@ -58,6 +58,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     try {
       assertBrainAccess({ headers: req.headers, body: undefined } as any, rawSession)
     } catch {
+      await new Promise((r) => setTimeout(r, 600))
       for (const f of Object.values(files)) {
         const one = Array.isArray(f) ? f[0] : f
         const p = (one as any)?.filepath || (one as any)?.path

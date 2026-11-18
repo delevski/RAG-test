@@ -40,7 +40,24 @@ await sql`CREATE TABLE IF NOT EXISTS rag_files (
   content bytea NOT NULL,
   PRIMARY KEY (session_id, filename)
 )`
+await sql`CREATE TABLE IF NOT EXISTS rag_messages (
+  session_id text NOT NULL,
+  conversation_id text NOT NULL DEFAULT 'default',
+  id bigserial PRIMARY KEY,
+  role text NOT NULL,
+  content text NOT NULL,
+  sources jsonb,
+  created_at timestamptz NOT NULL DEFAULT now()
+)`
+await sql`CREATE INDEX IF NOT EXISTS rag_messages_session_idx ON rag_messages (session_id, conversation_id, id)`
+await sql`CREATE TABLE IF NOT EXISTS rag_notes (
+  id bigserial PRIMARY KEY,
+  session_id text NOT NULL,
+  text text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+)`
+await sql`CREATE INDEX IF NOT EXISTS rag_notes_session_idx ON rag_notes (session_id, id)`
 // Retention index: lets the cleanup script find expired sessions fast.
 await sql`CREATE INDEX IF NOT EXISTS rag_docs_created_at_idx ON rag_docs (created_at)`
 
-console.log('Schema ready: rag_docs, rag_chunks, rag_files (idempotent).')
+console.log('Schema ready: rag_docs, rag_chunks, rag_files, rag_messages, rag_notes (idempotent).')

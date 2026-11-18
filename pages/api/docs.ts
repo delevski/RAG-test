@@ -17,7 +17,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   try {
     assertBrainAccess(req, session)
   } catch (err: any) {
-    if (err?.message === BRAIN_FORBIDDEN) return res.status(403).json({ error: 'Owner passphrase required' })
+    if (err?.message === BRAIN_FORBIDDEN) {
+      await new Promise((r) => setTimeout(r, 600))
+      return res.status(403).json({ error: 'Owner passphrase required' })
+    }
+
     throw err
   }
   try {

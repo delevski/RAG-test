@@ -1,6 +1,13 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import type { SessionDocRecord, SessionSnapshot, SessionStore, StoredMessage } from './sessionStore'
+import type {
+  SessionDocRecord,
+  SessionSnapshot,
+  SessionStore,
+  StoredConversation,
+  StoredMessage,
+  StoredNote,
+} from './sessionStore'
 import type { StoredChunk } from '@/lib/vectorstore/jsonVectorStore'
 
 // /tmp is the only writable path on serverless platforms (Vercel, Lambda).
@@ -109,23 +116,97 @@ export class FileSessionStore implements SessionStore {
     await this.saveSession(sessionId, snap)
   }
 
-  async appendMessages(sessionId: string, messages: StoredMessage[]): Promise<void> {
-    const dir = sessionDataDir(sessionId)
-    await fs.promises.mkdir(dir, { recursive: true })
-    const lines = messages.map((m) => JSON.stringify(m)).join('\n') + '\n'
-    await fs.promises.appendFile(path.join(dir, 'messages.jsonl'), lines, 'utf8')
-  }
-
-  async listMessages(sessionId: string, limit: number): Promise<StoredMessage[]> {
+  private async readMessages(sessionId: string): Promise<Array<StoredMessage & { c: string }>> {
     try {
       const raw = await fs.promises.readFile(path.join(sessionDataDir(sessionId), 'messages.jsonl'), 'utf8')
-      return raw
-        .split('\n')
-        .filter(Boolean)
-        .map((l) => JSON.parse(l) as StoredMessage)
-        .slice(-limit)
+      return raw.split('\n').filter(Boolean).map((l) => JSON.parse(l))
     } catch {
       return []
     }
+  }
+
+  private async writeMessages(sessionId: string, rows: Array<StoredMessage & { c: string }>) {
+    const dir = sessionDataDir(sessionId)
+    await fs.promises.mkdir(dir, { recursive: true })
+    await fs.promises.writeFile(
+      path.join(dir, 'messages.jsonl'),
+      rows.map((r) => JSON.stringify(r)).join('\n') + (rows.length ? '\n' : ''),
+      'utf8'
+    )
+  }
+
+  async appendMessages(sessionId: string, conversationId: string, messages: StoredMessage[]): Promise<void> {
+    const dir = sessionDataDir(sessionId)
+    await fs.promises.mkdir(dir, { recursive: true })
+    const lines = messages.map((m) => JSON.stringify({ ...m, c: conversationId })).join('\n') + '\n'
+    await fs.promises.appendFile(path.join(dir, 'messages.jsonl'), lines, 'utf8')
+  }
+
+  async listMessages(sessionId: string, conversationId: string, limit: number): Promise<StoredMessage[]> {
+    const rows = await this.readMessages(sessionId)
+    return rows
+      .filter((r) => r.c === conversationId)
+      .slice(-limit)
+      .map(({ c, ...m }) => m)
+  }
+
+  async listConversations(sessionId: string): Promise<StoredConversation[]> {
+    const by = new Map<string, StoredConversation>()
+    for (const r of await this.readMessages(sessionId)) {
+      const cur = by.get(r.c)
+      if (!cur) {
+        by.set(r.c, {
+          id: r.c,
+          title: (r.role === 'user' ? r.content : 'Conversation').replace(/\s+/g, ' ').slice(0, 80),
+          updatedAt: r.ts,
+          count: 1,
+        })
+      } else {
+        cur.count++
+        cur.updatedAt = r.ts
+        if (cur.title === 'Conversation' && r.role === 'user') cur.title = r.content.replace(/\s+/g, ' ').slice(0, 80)
+      }
+    }
+    return [...by.values()].sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))
+  }
+
+  async deleteConversation(sessionId: string, conversationId: string): Promise<void> {
+    const rows = await this.readMessages(sessionId)
+    await this.writeMessages(sessionId, rows.filter((r) => r.c !== conversationId))
+  }
+
+  private async readNotes(sessionId: string): Promise<StoredNote[]> {
+    try {
+      return JSON.parse(await fs.promises.readFile(path.join(sessionDataDir(sessionId), 'notes.json'), 'utf8'))
+    } catch {
+      return []
+    }
+  }
+
+  private async writeNotes(sessionId: string, notes: StoredNote[]) {
+    const dir = sessionDataDir(sessionId)
+    await fs.promises.mkdir(dir, { recursive: true })
+    await fs.promises.writeFile(path.join(dir, 'notes.json'), JSON.stringify(notes), 'utf8')
+  }
+
+  async addNote(sessionId: string, text: string): Promise<StoredNote> {
+    const notes = await this.readNotes(sessionId)
+    const next = notes.reduce((m, n) => Math.max(m, Number(n.id)), 0) + 1
+    const note = { id: String(next), text, ts: new Date().toISOString() }
+    notes.push(note)
+    await this.writeNotes(sessionId, notes)
+    return note
+  }
+
+  async listNotes(sessionId: string): Promise<StoredNote[]> {
+    return this.readNotes(sessionId)
+  }
+
+  async deleteNote(sessionId: string, noteId: string): Promise<boolean> {
+    const notes = await this.readNotes(sessionId)
+    const left = notes.filter((n) => n.id !== noteId)
+    if (left.length === notes.length) return false
+    await this.writeNotes(sessionId, left)
+    return true
   }
 }

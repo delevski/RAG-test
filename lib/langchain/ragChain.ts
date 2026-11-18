@@ -70,6 +70,8 @@ export async function runRagQuery(
     history?: HistoryTurn[]
     /** Second brain: retrieval over a possibly empty space is fine, not INDEX_MISSING. */
     allowEmptyIndex?: boolean
+    /** Pre-formatted saved notes (second brain); '(none)' otherwise. */
+    notes?: string
   } = {}
 ): Promise<RagResult> {
   let context = ''
@@ -133,7 +135,7 @@ export async function runRagQuery(
       },
     })
     const chain = prompt.pipe(llm).pipe(new TextOnlyOutputParser())
-    const stream = await chain.stream({ context, question: query, history })
+    const stream = await chain.stream({ context, question: query, history, notes: opts.notes ?? '(none)' })
     let answered = false
     for await (const chunk of stream) {
       if (typeof chunk === 'string' && chunk.length > 0) {
@@ -167,7 +169,7 @@ export async function runRagQuery(
   })
 
   const chain = prompt.pipe(llm).pipe(new TextOnlyOutputParser())
-  const stream = await chain.stream({ context, question: query, history })
+  const stream = await chain.stream({ context, question: query, history, notes: opts.notes ?? '(none)' })
 
   let answered = false
   for await (const chunk of stream) {

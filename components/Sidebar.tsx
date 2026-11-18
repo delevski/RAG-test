@@ -14,6 +14,8 @@ export default function Sidebar({
   onRetryDoc,
   ownerToken,
   brain = false,
+  onOpenDoc,
+  brainPanel,
 }: {
   uploadedDocs: DocItem[]
   sessionId: string
@@ -24,6 +26,8 @@ export default function Sidebar({
   ownerToken?: string
   /** Second-brain mode: one permanent space, so there is no "new session". */
   brain?: boolean
+  onOpenDoc?: (doc: DocItem) => void
+  brainPanel?: React.ReactNode
 }) {
   return (
     <aside className="hidden lg:flex fixed left-0 top-0 h-dvh w-[320px] flex-col border-r border-[var(--border)] bg-[var(--surface)]/70 backdrop-blur-xl z-30">
@@ -65,7 +69,8 @@ export default function Sidebar({
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 pb-4">
-        <DocList docs={uploadedDocs} onRemove={onRemoveDoc} onRetry={onRetryDoc} />
+        <DocList docs={uploadedDocs} onRemove={onRemoveDoc} onRetry={onRetryDoc} onOpen={onOpenDoc} />
+        {brainPanel && <div className="pt-5">{brainPanel}</div>}
       </div>
     </aside>
   )

@@ -43,6 +43,9 @@ export type StoredMessage = {
   sources?: Array<{ name: string; snippet: string }>
 }
 
+export type StoredConversation = { id: string; title: string; updatedAt: string; count: number }
+export type StoredNote = { id: string; text: string; ts: string }
+
 export interface SessionStore {
   readonly driver: 'file' | 'neon'
   loadSession(sessionId: string): Promise<SessionSnapshot | null>
@@ -59,9 +62,15 @@ export interface SessionStore {
     docs: SessionDocRecord[],
     chunks: StoredChunk[]
   ): Promise<void>
-  /** Durable chat history, oldest first (the last `limit` messages). */
-  appendMessages(sessionId: string, messages: StoredMessage[]): Promise<void>
-  listMessages(sessionId: string, limit: number): Promise<StoredMessage[]>
+  /** Durable chat history per conversation, oldest first (the last `limit` messages). */
+  appendMessages(sessionId: string, conversationId: string, messages: StoredMessage[]): Promise<void>
+  listMessages(sessionId: string, conversationId: string, limit: number): Promise<StoredMessage[]>
+  listConversations(sessionId: string): Promise<StoredConversation[]>
+  deleteConversation(sessionId: string, conversationId: string): Promise<void>
+  /** Memory notes (second brain): plain facts the owner told the brain. */
+  addNote(sessionId: string, text: string): Promise<StoredNote>
+  listNotes(sessionId: string): Promise<StoredNote[]>
+  deleteNote(sessionId: string, noteId: string): Promise<boolean>
 }
 
 let active: SessionStore | null = null

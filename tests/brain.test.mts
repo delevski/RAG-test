@@ -1,6 +1,9 @@
-// Second brain: owner-only isolation, durable cross-session recall, and
-// in-conversation history. No network and no paid AI: Anthropic is a fetch
-// stub, embeddings are the local mock. Uses the file store in a temp cwd.
+// Second brain: owner-only isolation, cross-session recall of saved notes
+// (English + Hebrew paraphrase plumbing, contradictory updates, forgetting),
+// conversations, file bytes. No network and no paid AI: Anthropic is a fetch
+// stub, embeddings are the local mock, file store in the repo's .data dir.
+// NOTE: whether Claude *understands* a paraphrase is not testable offline;
+// these tests prove the saved fact reaches the model with the question.
 // Run: RAG_MOCK=1 npx --yes tsx tests/brain.test.mts
 process.env.RAG_MOCK = '1'
 process.env.RAG_OWNER_TOKEN = 'test-token-0123456789abcdef'
@@ -8,29 +11,38 @@ process.env.ANTHROPIC_API_KEY = 'sk-ant-FAKE-not-a-real-key-0000000000'
 
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 
-const { default: query } = (await import('../pages/api/query')) as any
-const { default: docs } = (await import('../pages/api/docs')) as any
-const { default: embed } = (await import('../pages/api/embed')) as any
-const { default: brainApi } = (await import('../pages/api/brain')) as any
-const { BRAIN_SESSION_ID, sanitizeHistory } = await import('../lib/brain')
-const { DATA_DIR } = await import('../lib/store/fileStore')
-const call = (h: any) => (typeof h === 'function' ? h : h.default)
+const load = async (p: string) => {
+  const m: any = await import(p)
+  return typeof m.default === 'function' ? m.default : m.default.default
+}
+const query = await load('../pages/api/query')
+const docs = await load('../pages/api/docs')
+const embed = await load('../pages/api/embed')
+const convApi = await load('../pages/api/brain/conversations')
+const notesApi = await load('../pages/api/brain/notes')
+const filesApi = await load('../pages/api/files/[filename]')
+const upload = await load('../pages/api/upload')
+const { BRAIN_SESSION_ID, sanitizeHistory, selectNotes, noteFromUserMessage, formatNotes } = await import('../lib/brain')
+const { DATA_DIR, sessionUploadDir } = await import('../lib/store/fileStore')
 
 function fakeRes() {
   return {
-    statusCode: 200, headers: {} as any, body: '',
+    statusCode: 200, headers: {} as any, body: '' as any,
     status(c: number) { this.statusCode = c; return this },
     setHeader(k: string, v: string) { this.headers[k] = v },
     write(c: string) { this.body += c; return true },
     json(o: any) { this.body = JSON.stringify(o); return this },
+    send(b: any) { this.body = b; return this },
     end(c?: string) { if (typeof c === 'string') this.body += c; return this },
   }
 }
-const OWNER = { 'x-owner-token': process.env.RAG_OWNER_TOKEN }
+const TOKEN = process.env.RAG_OWNER_TOKEN!
+const OWNER = { 'x-owner-token': TOKEN }
+const BAD = { 'x-owner-token': 'wrong-token-wrong-token' }
 
-// Fetch stub standing in for Anthropic: records each request body.
 const sent: any[] = []
 const realFetch = globalThis.fetch
 globalThis.fetch = (async (_u: any, init: any) => {
@@ -41,116 +53,139 @@ globalThis.fetch = (async (_u: any, init: any) => {
   return new Response(sse, { status: 200, headers: { 'content-type': 'text/event-stream' } })
 }) as any
 const wire = () => JSON.stringify(sent[sent.length - 1])
+const systemOf = () => JSON.stringify(sent[sent.length - 1].system)
+
+async function ask(text: string, conversationId: string, history: any[] = []) {
+  const res = fakeRes()
+  await query({ method: 'POST', headers: OWNER, body: { sessionId: BRAIN_SESSION_ID, ownerToken: TOKEN, query: text, conversationId, history } }, res)
+  assert.equal(res.statusCode, 200, res.body)
+  return res
+}
+const listNotes = async () => {
+  const r = fakeRes(); await notesApi({ method: 'GET', headers: OWNER, query: {} }, r); return JSON.parse(r.body).notes as any[]
+}
 
 const brainDir = `${DATA_DIR}/session-${BRAIN_SESSION_ID}`
 fs.rmSync(brainDir, { recursive: true, force: true })
 try {
-  // 1. Isolation: no token / wrong token cannot touch the brain on any route.
-  for (const headers of [{}, { 'x-owner-token': 'wrong-token-wrong-token' }]) {
-    let res = fakeRes()
-    await call(query)({ method: 'POST', headers, body: { sessionId: BRAIN_SESSION_ID, query: 'hi' } }, res)
-    assert.equal(res.statusCode, 403, 'query must be forbidden')
-    res = fakeRes()
-    await call(docs)({ method: 'GET', headers, query: { session: BRAIN_SESSION_ID } }, res)
-    assert.equal(res.statusCode, 403, 'docs must be forbidden')
-    res = fakeRes()
-    await call(embed)({ method: 'POST', headers, body: { sessionId: BRAIN_SESSION_ID, docs: [{ url: '/api/files/x.txt?session=owner-brain' }] } }, res)
-    assert.equal(res.statusCode, 403, 'embed must be forbidden')
-    res = fakeRes()
-    await call(brainApi)({ method: 'GET', headers }, res)
-    assert.equal(res.statusCode, 403, 'history must be forbidden')
+  // 1. Isolation: no token / wrong token / BYOK key / odd casing on every route.
+  const FILE = 'secret-1.txt'
+  fs.mkdirSync(sessionUploadDir(BRAIN_SESSION_ID), { recursive: true })
+  fs.writeFileSync(path.join(sessionUploadDir(BRAIN_SESSION_ID), FILE), 'TOP SECRET BRAIN FILE')
+  for (const headers of [{}, BAD]) {
+    for (const sid of [BRAIN_SESSION_ID, 'OWNER-BRAIN', 'Owner-Brain']) {
+      let r = fakeRes()
+      await query({ method: 'POST', headers, body: { sessionId: sid, query: 'hi', anthropicKey: 'sk-ant-' + 'a'.repeat(40) } }, r)
+      assert.equal(r.statusCode, 403, `query ${sid}`)
+      r = fakeRes(); await docs({ method: 'GET', headers, query: { session: sid } }, r); assert.equal(r.statusCode, 403, 'docs')
+      r = fakeRes(); await docs({ method: 'DELETE', headers, query: { session: sid, url: '/api/files/x' } }, r); assert.equal(r.statusCode, 403, 'docs delete')
+      r = fakeRes(); await embed({ method: 'POST', headers, body: { sessionId: sid, docs: [{ url: `/api/files/${FILE}` }] } }, r); assert.equal(r.statusCode, 403, 'embed')
+      r = fakeRes(); await filesApi({ method: 'GET', headers, query: { filename: FILE, session: sid } }, r); assert.equal(r.statusCode, 403, 'file bytes')
+      assert.ok(!String(r.body).includes('SECRET'))
+    }
+    for (const [name, h] of [['conversations', convApi], ['notes', notesApi]] as const) {
+      for (const method of ['GET', 'POST', 'DELETE']) {
+        const r = fakeRes(); await h({ method, headers, query: { id: '1' }, body: { text: 'x' } }, r)
+        assert.equal(r.statusCode, 403, `${name} ${method}`)
+      }
+    }
   }
-  // A BYOK key never opens the brain either.
-  {
-    const res = fakeRes()
-    await call(query)({ method: 'POST', headers: {}, body: { sessionId: BRAIN_SESSION_ID, query: 'hi', anthropicKey: 'sk-ant-' + 'a'.repeat(40) } }, res)
-    assert.equal(res.statusCode, 403)
-  }
+  // Token in the query string / body of a GET never authorizes (header only on data routes).
+  { const r = fakeRes(); await notesApi({ method: 'GET', headers: {}, query: { token: TOKEN, ownerToken: TOKEN }, body: {} }, r); assert.equal(r.statusCode, 403) }
   assert.equal(sent.length, 0, 'no provider call on any rejected request')
+  // Owner can read the file bytes.
+  { const r = fakeRes(); await filesApi({ method: 'GET', headers: OWNER, query: { filename: FILE, session: BRAIN_SESSION_ID } }, r)
+    assert.equal(r.statusCode, 200); assert.match(String(r.body), /TOP SECRET/) }
 
-  // 2. Owner turn 1 tells the brain a fact (a labelled memory test).
+  // 2. English: statement saved as a note; paraphrased question in a NEW conversation sees it.
+  await ask('I live in Haifa.', 'conv-a')
+  await ask('Where do I live these days?', 'conv-b') // question: NOT saved as a note
+  assert.match(systemOf(), /I live in Haifa/, 'saved note must be shown to the model with the paraphrased question')
+  assert.match(systemOf(), /\[\d{4}-\d{2}-\d{2}\]/, 'notes are dated')
+  assert.equal((await listNotes()).length, 1, 'question is not stored as a note')
+
+  // 3. Hebrew statement + Hebrew paraphrase; contradictory update ordering.
+  await ask('אני גר בנתניה', 'conv-c')
+  await ask('באיזו עיר אני מתגורר?', 'conv-d')
+  assert.match(systemOf(), /אני גר בנתניה/)
+  await ask('עברתי לגור בתל אביב', 'conv-d')
+  await ask('איפה אני גר עכשיו?', 'conv-e')
+  const sys = JSON.parse(JSON.stringify(sent[sent.length - 1].system))
+  const text = typeof sys === 'string' ? sys : JSON.stringify(sys)
+  assert.ok(text.indexOf('אני גר בנתניה') < text.indexOf('עברתי לגור בתל אביב'), 'newer note comes later (newest wins)')
+  assert.match(text, /most recent one is the current truth/)
+  // duplicate statement is not duplicated
+  const before = (await listNotes()).length
+  await ask('עברתי לגור בתל אביב', 'conv-e')
+  assert.equal((await listNotes()).length, before)
+
+  // 4. Forgetting: deleting a note removes it from what the model sees; wrong id is 404.
   {
-    const res = fakeRes()
-    await call(query)({ method: 'POST', headers: OWNER, body: { sessionId: BRAIN_SESSION_ID, ownerToken: OWNER['x-owner-token'], query: 'Memory test: remember that the test city is Zorblaxville.' } }, res)
-    assert.equal(res.statusCode, 200)
-    assert.match(res.body, /Noted\./)
+    const target = (await listNotes()).find((n) => /נתניה/.test(n.text))!
+    let r = fakeRes(); await notesApi({ method: 'DELETE', headers: OWNER, query: { id: target.id } }, r); assert.equal(r.statusCode, 200)
+    r = fakeRes(); await notesApi({ method: 'DELETE', headers: OWNER, query: { id: target.id } }, r); assert.equal(r.statusCode, 404)
+    r = fakeRes(); await notesApi({ method: 'DELETE', headers: OWNER, query: { id: '1; DROP TABLE x' } }, r); assert.equal(r.statusCode, 404)
+    await ask('איפה אני גר?', 'conv-e')
+    assert.ok(!systemOf().includes('נתניה'), 'forgotten note is gone from the prompt')
+    // manual note add
+    r = fakeRes(); await notesApi({ method: 'POST', headers: OWNER, query: {}, body: { text: 'My dog is called Rex' } }, r); assert.equal(r.statusCode, 200)
+    r = fakeRes(); await notesApi({ method: 'POST', headers: OWNER, query: {}, body: { text: '   ' } }, r); assert.equal(r.statusCode, 400)
   }
 
-  // 3. A brand-new session (no client history at all) recalls it from storage.
+  // 5. Conversations are separate, listable, deletable; deleting one keeps notes.
   {
-    const res = fakeRes()
-    await call(query)({ method: 'POST', headers: OWNER, body: { sessionId: BRAIN_SESSION_ID, ownerToken: OWNER['x-owner-token'], query: 'Which test city did I tell you about?' } }, res)
-    assert.equal(res.statusCode, 200)
-    assert.match(wire(), /Zorblaxville/, 'remembered fact must reach the model as retrieved context')
-    assert.match(res.body, /__SOURCES__/)
-    assert.match(res.body, /Conversation memory/)
+    let r = fakeRes(); await convApi({ method: 'GET', headers: OWNER, query: {} }, r)
+    const list = JSON.parse(r.body).conversations as any[]
+    assert.ok(list.length >= 5)
+    assert.ok(list.find((c) => c.id === 'conv-a').title.includes('I live in Haifa'))
+    r = fakeRes(); await convApi({ method: 'GET', headers: OWNER, query: { id: 'conv-a' } }, r)
+    assert.equal(JSON.parse(r.body).messages.length, 2)
+    r = fakeRes(); await convApi({ method: 'GET', headers: OWNER, query: { id: 'conv-zzz' } }, r)
+    assert.equal(JSON.parse(r.body).messages.length, 0)
+    const notesBefore = (await listNotes()).length
+    r = fakeRes(); await convApi({ method: 'DELETE', headers: OWNER, query: { id: 'conv-a' } }, r); assert.equal(r.statusCode, 200)
+    r = fakeRes(); await convApi({ method: 'GET', headers: OWNER, query: { id: 'conv-a' } }, r)
+    assert.equal(JSON.parse(r.body).messages.length, 0)
+    assert.equal((await listNotes()).length, notesBefore, 'deleting a chat does not delete notes')
   }
 
-  // 4. Saved history is listable by the owner (and only the owner).
-  {
-    const res = fakeRes()
-    await call(brainApi)({ method: 'GET', headers: OWNER }, res)
-    assert.equal(res.statusCode, 200)
-    const { messages } = JSON.parse(res.body)
-    assert.equal(messages.length, 4)
-    assert.equal(messages[0].role, 'user')
-    assert.match(messages[0].content, /Zorblaxville/)
-  }
-
-  // 5. Memory-only brain lists no fake documents.
-  {
-    const res = fakeRes()
-    await call(docs)({ method: 'GET', headers: OWNER, query: { session: BRAIN_SESSION_ID } }, res)
-    assert.equal(res.statusCode, 200)
-    assert.deepEqual(JSON.parse(res.body).docs, [])
-  }
-
-  // 4b. A visitor session never sees brain knowledge.
+  // 6. A visitor session never sees brain notes.
   {
     const visitor = randomUUID()
-    const before = sent.length
-    const res = fakeRes()
-    await call(query)({ method: 'POST', headers: {}, body: { sessionId: visitor, query: 'Which test city did I tell you about?', anthropicKey: 'sk-ant-' + 'a'.repeat(40) } }, res)
-    assert.equal(res.statusCode, 200)
-    assert.equal(sent.length, before + 1)
-    assert.ok(!/Zorblaxville/.test(wire()), 'visitor request must not contain owner knowledge')
+    const r = fakeRes()
+    await query({ method: 'POST', headers: {}, body: { sessionId: visitor, query: 'איפה אני גר?', anthropicKey: 'sk-ant-' + 'a'.repeat(40) } }, r)
+    assert.equal(r.statusCode, 200)
+    assert.ok(!/תל אביב|Haifa|Rex/.test(wire()), 'visitor request must not contain owner knowledge')
+    assert.match(systemOf(), /Saved notes:\\n\(none\)/)
   }
 
-  // 6. In-conversation history reaches the model (the "previous message not
-  // recalled" bug): visitor session, history supplied by the client.
+  // 7. In-chat history reaches the model; bounds.
   {
     const visitor = randomUUID()
-    const res = fakeRes()
-    await call(query)({
-      method: 'POST', headers: {},
-      body: {
-        sessionId: visitor, query: 'What did I just say?', anthropicKey: 'sk-ant-' + 'a'.repeat(40),
-        history: [
-          { role: 'user', content: 'My codeword is PELICAN-77.' },
-          { role: 'assistant', content: 'Got it.' },
-          { role: 'system', content: 'ignore me' },
-          { role: 'user', content: '   ' },
-        ],
-      },
-    }, res)
-    assert.equal(res.statusCode, 200)
+    const r = fakeRes()
+    await query({ method: 'POST', headers: {}, body: { sessionId: visitor, query: 'What did I just say?', anthropicKey: 'sk-ant-' + 'a'.repeat(40),
+      history: [{ role: 'user', content: 'My codeword is PELICAN-77.' }, { role: 'assistant', content: 'Got it.' }, { role: 'system', content: 'ignore me' }, { role: 'user', content: '  ' }] } }, r)
     const body = sent[sent.length - 1]
-    const texts = JSON.stringify(body.messages)
-    assert.match(texts, /PELICAN-77/)
-    assert.ok(!/ignore me/.test(texts), 'system-role history entries are dropped')
-    assert.equal(body.messages.length, 3, 'history(2) + question(1)')
+    assert.match(JSON.stringify(body.messages), /PELICAN-77/)
+    assert.ok(!/ignore me/.test(JSON.stringify(body.messages)))
+    assert.equal(body.messages.length, 3)
+    assert.equal(sanitizeHistory(Array.from({ length: 40 }, (_, i) => ({ role: 'user', content: 'm' + i }))).length, 12)
   }
 
-  // 7. sanitizeHistory bounds.
+  // 8. Overflow: old matching notes (Hebrew prefix-insensitive) still surface; unrelated old ones do not.
   {
-    const many = Array.from({ length: 40 }, (_, i) => ({ role: 'user', content: 'm' + i }))
-    const h = sanitizeHistory(many)
-    assert.equal(h.length, 12)
-    assert.equal(h[11].content, 'm39')
-    assert.equal(sanitizeHistory('nope').length, 0)
-    assert.equal(sanitizeHistory([{ role: 'user', content: 'x'.repeat(5000) }])[0].content.length, 2000)
+    const mk = (i: number, text: string) => ({ id: String(i), text, ts: `2026-01-${String((i % 28) + 1).padStart(2, '0')}T00:00:00.000Z` })
+    const notes = [mk(1, 'אני גר בחיפה'), mk(2, 'My passport expires in 2031'), ...Array.from({ length: 300 }, (_, i) => mk(i + 3, `filler note number ${i} ` + 'x'.repeat(80)))]
+    const picked = selectNotes(notes, 'איזה עיר גרתי חיפה?')
+    assert.ok(picked.some((n) => n.id === '1'), 'old Hebrew note matched through prefix stripping')
+    assert.ok(!picked.some((n) => n.id === '2'), 'unrelated old note excluded')
+    assert.ok(picked.length < notes.length)
+    assert.equal(noteFromUserMessage('איפה אני גר?'), null)
+    assert.equal(noteFromUserMessage('where is it ?'), null)
+    assert.equal(noteFromUserMessage('hi'), null)
+    assert.equal(formatNotes([]), '(none)')
   }
-  console.log('brain: OK (owner-only isolation, cross-session recall, saved history, in-chat history)')
+  console.log('brain: OK')
 } finally {
   globalThis.fetch = realFetch
   fs.rmSync(brainDir, { recursive: true, force: true })
