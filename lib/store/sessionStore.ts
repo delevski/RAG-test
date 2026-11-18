@@ -35,6 +35,14 @@ export type SessionSnapshot = {
   chunks: StoredChunk[]
 }
 
+export type StoredMessage = {
+  role: 'user' | 'assistant'
+  content: string
+  /** ISO timestamp. */
+  ts: string
+  sources?: Array<{ name: string; snippet: string }>
+}
+
 export interface SessionStore {
   readonly driver: 'file' | 'neon'
   loadSession(sessionId: string): Promise<SessionSnapshot | null>
@@ -42,6 +50,18 @@ export interface SessionStore {
   putFile(sessionId: string, filename: string, content: Buffer): Promise<void>
   getFile(sessionId: string, filename: string): Promise<Buffer | null>
   deleteFile(sessionId: string, filename: string): Promise<void>
+  /**
+   * Incremental write (second brain): add docs and chunks WITHOUT rewriting
+   * what is already stored, so a growing knowledge base never gets reshuffled.
+   */
+  appendDocsAndChunks(
+    sessionId: string,
+    docs: SessionDocRecord[],
+    chunks: StoredChunk[]
+  ): Promise<void>
+  /** Durable chat history, oldest first (the last `limit` messages). */
+  appendMessages(sessionId: string, messages: StoredMessage[]): Promise<void>
+  listMessages(sessionId: string, limit: number): Promise<StoredMessage[]>
 }
 
 let active: SessionStore | null = null

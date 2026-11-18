@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Sidebar from '@/components/Sidebar'
 import FileUpload, { type UploadedDoc } from '@/components/FileUpload'
 import DocList from '@/components/DocList'
@@ -8,11 +8,12 @@ import ChatInterface from '@/components/ChatInterface'
 import MobileNav, { type MobileTab } from '@/components/MobileNav'
 import type { DocItem } from '@/lib/docs'
 import { PlusIcon } from '@/components/Icons'
+import { BRAIN_SESSION_ID } from '@/lib/brainId'
 
 export default function HomePage() {
   // Empty until mounted: the id comes from localStorage, so SSR and the
   // first client render must agree on "no session yet".
-  const [sessionId, setSessionId] = useState<string>('')
+  const [localSession, setLocalSession] = useState<string>('')
   const [docs, setDocs] = useState<DocItem[]>([])
   const [mobileTab, setMobileTab] = useState<MobileTab>('chat')
   // BYOK: the visitor's Claude key lives ONLY in this React state. It is
@@ -23,6 +24,15 @@ export default function HomePage() {
   // server uses its own stored key instead of a visitor-entered one.
   const [ownerToken, setOwnerToken] = useState('')
   const [keyPanelOpen, setKeyPanelOpen] = useState(false)
+  // Owner mode switches to the one permanent, owner-only second brain. Visitors
+  // never see it: the server rejects its id without the owner passphrase.
+  const brain = Boolean(ownerToken)
+  const sessionId = brain ? BRAIN_SESSION_ID : localSession
+  const authHeaders = useMemo(() => {
+    const h: Record<string, string> = {}
+    if (ownerToken) h['x-owner-token'] = ownerToken
+    return h
+  }, [ownerToken])
   // Serializes embedding work; chat waits on it before querying.
   const embedQueue = useRef<Promise<void>>(Promise.resolve())
 
@@ -31,8 +41,7 @@ export default function HomePage() {
   // store when one is configured). "New Session" is the only reset.
   const hydrationRan = useRef(false)
   useEffect(() => {
-    // StrictMode double-invokes effects in dev; hydration must run exactly
-    // once, and it must never overwrite documents uploaded in the meantime.
+    // StrictMode double-invokes effects in dev; the id must be created once.
     if (hydrationRan.current) return
     hydrationRan.current = true
     let id = window.localStorage.getItem('rag:session')
@@ -40,31 +49,46 @@ export default function HomePage() {
       id = crypto.randomUUID()
       window.localStorage.setItem('rag:session', id)
     }
-    setSessionId(id)
-    fetch(`/api/docs?session=${encodeURIComponent(id)}`)
+    setLocalSession(id)
+  }, [])
+
+  // Load the active space's document list: the visitor's own session, or the
+  // owner's second brain once the passphrase is connected. Documents still
+  // uploading or failed in this tab are kept on top of the server list.
+  useEffect(() => {
+    if (!sessionId) return
+    let cancelled = false
+    fetch(`/api/docs?session=${encodeURIComponent(sessionId)}`, { headers: authHeaders })
       .then((res) => (res.ok ? res.json() : { docs: [] }))
       .then(
         (data: {
           docs: Array<{ url: string; name?: string; filename: string; size?: number; type?: string }>
         }) => {
-          if (!Array.isArray(data.docs)) return
+          if (cancelled || !Array.isArray(data.docs)) return
           setDocs((prev) => {
-            if (prev.length > 0) return prev // user already uploaded; server list is stale
-            return data.docs.map((d) => ({
-              id: crypto.randomUUID(),
-              name: d.name ?? d.filename,
-              url: d.url,
-              size: d.size ?? 0,
-              type: d.type ?? '',
-              status: 'ready' as const,
-            }))
+            const pending = prev.filter((d) => d.status !== 'ready')
+            const known = new Set(data.docs.map((d) => d.url))
+            return [
+              ...data.docs.map((d) => ({
+                id: crypto.randomUUID(),
+                name: d.name ?? d.filename,
+                url: d.url,
+                size: d.size ?? 0,
+                type: d.type ?? '',
+                status: 'ready' as const,
+              })),
+              ...pending.filter((d) => !known.has(d.url)),
+            ]
           })
         }
       )
       .catch(() => {
         /* listing failed - the user can re-upload; chat still works */
       })
-  }, [])
+    return () => {
+      cancelled = true
+    }
+  }, [sessionId, authHeaders])
 
   const embedDocs = useCallback(
     (items: DocItem[]) => {
@@ -72,7 +96,7 @@ export default function HomePage() {
         try {
           const res = await fetch('/api/embed', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...authHeaders },
             body: JSON.stringify({
               sessionId,
               docs: items.map((d) => ({ url: d.url, name: d.name, size: d.size, type: d.type })),
@@ -98,7 +122,7 @@ export default function HomePage() {
       embedQueue.current = embedQueue.current.then(run)
       return embedQueue.current
     },
-    [sessionId]
+    [sessionId, authHeaders]
   )
 
   const handleUploaded = useCallback(
@@ -124,11 +148,11 @@ export default function HomePage() {
       if (doc) {
         void fetch(
           `/api/docs?session=${encodeURIComponent(sessionId)}&url=${encodeURIComponent(doc.url)}`,
-          { method: 'DELETE' }
+          { method: 'DELETE', headers: authHeaders }
         ).catch(() => {})
       }
     },
-    [docs, sessionId]
+    [docs, sessionId, authHeaders]
   )
 
   const handleRetryDoc = useCallback(
@@ -144,7 +168,7 @@ export default function HomePage() {
   const handleNewSession = useCallback(() => {
     const id = crypto.randomUUID()
     window.localStorage.setItem('rag:session', id)
-    setSessionId(id)
+    setLocalSession(id)
     setDocs([])
     embedQueue.current = Promise.resolve()
     setMobileTab('chat')
@@ -177,6 +201,8 @@ export default function HomePage() {
         onUploaded={handleUploaded}
         onRemoveDoc={handleRemoveDoc}
         onRetryDoc={handleRetryDoc}
+        ownerToken={ownerToken || undefined}
+        brain={brain}
       />
 
       <main className="h-dvh flex flex-col lg:ml-[320px] pb-[64px] lg:pb-0">
@@ -197,7 +223,7 @@ export default function HomePage() {
             )}
             {ownerToken && (
               <span className="inline-flex items-center rounded-full border border-emerald-400/40 bg-emerald-400/10 px-2.5 py-0.5 text-[10px] font-medium text-emerald-300">
-                Owner mode · site&rsquo;s Claude key
+                Second brain · owner mode
               </span>
             )}
             <button
@@ -220,6 +246,7 @@ export default function HomePage() {
           </div>
           <button
             onClick={handleNewSession}
+            hidden={brain}
             className="lg:hidden shrink-0 flex items-center gap-1.5 rounded-lg border border-[var(--border)] px-2.5 py-1.5 text-xs text-gray-200 hover:border-primary/50 transition-colors"
           >
             <PlusIcon className="w-3.5 h-3.5" />
@@ -237,6 +264,7 @@ export default function HomePage() {
             onReindex={handleReindex}
             anthropicKey={anthropicKey || undefined}
             ownerToken={ownerToken || undefined}
+            brain={brain}
           />
         </div>
 
@@ -245,7 +273,7 @@ export default function HomePage() {
           className={`flex-1 overflow-y-auto lg:hidden ${mobileTab === 'files' ? 'rise-in' : 'hidden'}`}
         >
           <div className="max-w-xl mx-auto p-4 space-y-4">
-            <FileUpload sessionId={sessionId} onComplete={handleUploaded} />
+            <FileUpload sessionId={sessionId} onComplete={handleUploaded} ownerToken={ownerToken || undefined} />
             <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-dim">
               Documents
             </div>

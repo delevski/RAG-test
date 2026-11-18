@@ -6,7 +6,8 @@ import {
   OWNER_TOKEN_INVALID,
 } from '@/lib/ai/ownerKey'
 import { runRagQuery } from '@/lib/langchain/ragChain'
-import { assertValidSessionId, MAX_QUERY_CHARS } from '@/lib/langchain/retriever'
+import { assertValidSessionId, MAX_QUERY_CHARS, rememberTurn } from '@/lib/langchain/retriever'
+import { assertBrainAccess, isBrainSession, sanitizeHistory, BRAIN_FORBIDDEN } from '@/lib/brain'
 import { RAG_MOCK_ENABLED, PAID_AI_DISABLED, paidAIAllowed } from '@/lib/ai/mock'
 
 /**
@@ -30,18 +31,30 @@ export const config = {
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') return res.status(405).end('Method not allowed')
-  const { sessionId, query, expectContext, anthropicKey, ownerToken } = req.body as {
+  const { sessionId, query, expectContext, anthropicKey, ownerToken, history } = req.body as {
     sessionId: string
     query: string
     expectContext?: boolean
     anthropicKey?: unknown
     ownerToken?: unknown
+    history?: unknown
   }
   try {
     assertValidSessionId(sessionId)
   } catch {
     return res.status(400).end('Invalid sessionId')
   }
+  // The owner's second brain is reachable only with the owner passphrase.
+  try {
+    assertBrainAccess(req, sessionId)
+  } catch (err: any) {
+    if (err?.message === BRAIN_FORBIDDEN) {
+      await new Promise((r) => setTimeout(r, 600))
+      return res.status(403).end('Owner passphrase required')
+    }
+    throw err
+  }
+  const brain = isBrainSession(sessionId)
   if (!query || typeof query !== 'string') return res.status(400).end('Missing query')
   if (query.length > MAX_QUERY_CHARS) {
     return res.status(400).end(`Query is limited to ${MAX_QUERY_CHARS} characters`)
@@ -87,10 +100,31 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   res.setHeader('Transfer-Encoding', 'chunked')
 
   try {
-    const { sources } = await runRagQuery(sessionId, query, (token) => res.write(token), {
-      expectContext: Boolean(expectContext),
-      anthropicKey: userAnthropicKey,
-    })
+    let answerText = ''
+    const { sources } = await runRagQuery(
+      sessionId,
+      query,
+      (token) => {
+        answerText += token
+        res.write(token)
+      },
+      {
+        // The brain always searches (documents AND remembered conversations).
+        expectContext: brain ? true : Boolean(expectContext),
+        allowEmptyIndex: brain,
+        anthropicKey: userAnthropicKey,
+        history: sanitizeHistory(history),
+      }
+    )
+    if (brain) {
+      // Remember the finished turn. A storage hiccup must never turn a
+      // good answer into an error, so it is logged and swallowed.
+      try {
+        await rememberTurn(sessionId, { user: query, assistant: answerText, sources })
+      } catch (e: any) {
+        console.error('brain remember error', e?.message ?? e)
+      }
+    }
     if (sources.length > 0) {
       res.write(`\n\n__SOURCES__${JSON.stringify(sources)}`)
     }

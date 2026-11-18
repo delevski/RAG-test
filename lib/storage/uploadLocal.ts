@@ -1,7 +1,8 @@
 export async function uploadToLocal(
   file: File,
   sessionId: string,
-  onProgress?: (p: number) => void
+  onProgress?: (p: number) => void,
+  ownerToken?: string
 ): Promise<{ url: string }> {
   const formData = new FormData()
   formData.append('sessionId', sessionId)
@@ -30,6 +31,7 @@ export async function uploadToLocal(
     xhr.addEventListener('error', () => reject(new Error('Network error during upload')))
     
     xhr.open('POST', '/api/upload')
+    if (ownerToken) xhr.setRequestHeader('x-owner-token', ownerToken)
     xhr.send(formData)
   })
 }

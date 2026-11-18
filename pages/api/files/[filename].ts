@@ -3,6 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import { assertValidSessionId, sessionUploadDir } from '@/lib/langchain/retriever'
 import { getSessionStore } from '@/lib/store/sessionStore'
+import { assertBrainAccess } from '@/lib/brain'
 
 /**
  * Serves an uploaded file back to the OWNING session only. Both the session
@@ -22,6 +23,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     assertValidSessionId(session)
   } catch {
     return res.status(400).json({ error: 'Invalid sessionId' })
+  }
+
+  try {
+    assertBrainAccess(req, session)
+  } catch {
+    return res.status(403).json({ error: 'Owner passphrase required' })
   }
 
   const uploadsDir = sessionUploadDir(session as string)

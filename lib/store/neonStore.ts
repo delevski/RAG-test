@@ -1,4 +1,4 @@
-import type { SessionDocRecord, SessionSnapshot, SessionStore } from './sessionStore'
+import type { SessionDocRecord, SessionSnapshot, SessionStore, StoredMessage } from './sessionStore'
 import type { StoredChunk } from '@/lib/vectorstore/jsonVectorStore'
 import { assertValidSessionId } from './fileStore'
 
@@ -55,6 +55,15 @@ export class NeonSessionStore implements SessionStore {
           embedding jsonb NOT NULL,
           PRIMARY KEY (session_id, idx)
         )`
+        await this.sql`CREATE TABLE IF NOT EXISTS rag_messages (
+          session_id text NOT NULL,
+          id bigserial PRIMARY KEY,
+          role text NOT NULL,
+          content text NOT NULL,
+          sources jsonb,
+          created_at timestamptz NOT NULL DEFAULT now()
+        )`
+        await this.sql`CREATE INDEX IF NOT EXISTS rag_messages_session_idx ON rag_messages (session_id, id)`
         await this.sql`CREATE TABLE IF NOT EXISTS rag_files (
           session_id text NOT NULL,
           filename text NOT NULL,
@@ -72,10 +81,11 @@ export class NeonSessionStore implements SessionStore {
     const docRows = await this.sql`
       SELECT url, filename, name, size, mime FROM rag_docs
       WHERE session_id = ${sessionId} ORDER BY created_at ASC`
-    if (docRows.length === 0) return null
     const chunkRows = await this.sql`
       SELECT content, metadata, embedding FROM rag_chunks
       WHERE session_id = ${sessionId} ORDER BY idx ASC`
+    // Memory-only spaces (second brain) can hold chunks before any document.
+    if (docRows.length === 0 && chunkRows.length === 0) return null
     const docs: SessionDocRecord[] = docRows.map((r: any) => ({
       url: r.url,
       filename: r.filename,
@@ -150,5 +160,62 @@ export class NeonSessionStore implements SessionStore {
     if (rows.length === 0) return null
     const c = rows[0].content
     return Buffer.isBuffer(c) ? c : Buffer.from(c)
+  }
+
+  async appendDocsAndChunks(
+    sessionId: string,
+    docs: SessionDocRecord[],
+    chunks: StoredChunk[]
+  ): Promise<void> {
+    assertValidSessionId(sessionId)
+    await this.ensureSchema()
+    const queries: any[] = []
+    for (const d of docs) {
+      queries.push(this.sql`
+        INSERT INTO rag_docs (session_id, url, filename, name, size, mime)
+        VALUES (${sessionId}, ${d.url}, ${d.filename}, ${d.name ?? null},
+                ${d.size ?? null}, ${d.type ?? null})
+        ON CONFLICT (session_id, url) DO NOTHING`)
+    }
+    // idx continues after the current maximum; computed inside each INSERT so
+    // appended rows can never collide with or overwrite existing chunks.
+    for (const ch of chunks) {
+      queries.push(this.sql`
+        INSERT INTO rag_chunks (session_id, idx, content, metadata, embedding)
+        VALUES (${sessionId},
+                (SELECT COALESCE(MAX(idx), -1) + 1 FROM rag_chunks WHERE session_id = ${sessionId}),
+                ${ch.content},
+                ${JSON.stringify(ch.metadata ?? {})}::jsonb,
+                ${JSON.stringify(ch.embedding)}::jsonb)`)
+    }
+    if (queries.length === 0) return
+    if (this.sql.transaction) await this.sql.transaction(queries)
+    else for (const q of queries) await q
+  }
+
+  async appendMessages(sessionId: string, messages: StoredMessage[]): Promise<void> {
+    assertValidSessionId(sessionId)
+    await this.ensureSchema()
+    const queries: any[] = messages.map((m) => this.sql`
+      INSERT INTO rag_messages (session_id, role, content, sources, created_at)
+      VALUES (${sessionId}, ${m.role}, ${m.content},
+              ${m.sources ? JSON.stringify(m.sources) : null}::jsonb, ${m.ts}::timestamptz)`)
+    if (queries.length === 0) return
+    if (this.sql.transaction) await this.sql.transaction(queries)
+    else for (const q of queries) await q
+  }
+
+  async listMessages(sessionId: string, limit: number): Promise<StoredMessage[]> {
+    assertValidSessionId(sessionId)
+    await this.ensureSchema()
+    const rows = await this.sql`
+      SELECT role, content, sources, created_at FROM rag_messages
+      WHERE session_id = ${sessionId} ORDER BY id DESC LIMIT ${limit}`
+    return rows.reverse().map((r: any) => ({
+      role: r.role,
+      content: r.content,
+      ts: new Date(r.created_at).toISOString(),
+      sources: r.sources == null ? undefined : typeof r.sources === 'string' ? JSON.parse(r.sources) : r.sources,
+    }))
   }
 }

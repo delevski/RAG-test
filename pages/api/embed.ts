@@ -4,6 +4,7 @@ import {
   assertValidSessionId,
   MAX_DOCS_PER_SESSION,
 } from '@/lib/langchain/retriever'
+import { assertBrainAccess, BRAIN_FORBIDDEN, isBrainSession, BRAIN_MAX_DOCS } from '@/lib/brain'
 import { RAG_MOCK_ENABLED, PAID_AI_DISABLED, paidAIAllowed } from '@/lib/ai/mock'
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -27,13 +28,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       docs: Array<{ url: string; name?: string; size?: number; type?: string }>
     }
     assertValidSessionId(sessionId)
+    assertBrainAccess(req, sessionId)
     if (!Array.isArray(docs) || docs.length === 0) {
       return res.status(400).json({ error: 'No documents provided' })
     }
-    if (docs.length > MAX_DOCS_PER_SESSION) {
+    if (docs.length > (isBrainSession(sessionId) ? BRAIN_MAX_DOCS : MAX_DOCS_PER_SESSION)) {
       return res
         .status(400)
-        .json({ error: `A session can hold at most ${MAX_DOCS_PER_SESSION} documents` })
+        .json({ error: `A session can hold at most ${isBrainSession(sessionId) ? BRAIN_MAX_DOCS : MAX_DOCS_PER_SESSION} documents` })
     }
     for (const d of docs) {
       if (!d || typeof d.url !== 'string' || d.url.length === 0 || d.url.length > 2048) {
@@ -46,6 +48,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   } catch (err: any) {
     console.error('embed error', err)
 
+    if (err?.message === BRAIN_FORBIDDEN) {
+      return res.status(403).json({ error: 'Owner passphrase required' })
+    }
     if (err?.message === 'Invalid sessionId') {
       return res.status(400).json({ error: 'Invalid sessionId' })
     }

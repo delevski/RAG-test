@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import type { SessionDocRecord, SessionSnapshot, SessionStore } from './sessionStore'
+import type { SessionDocRecord, SessionSnapshot, SessionStore, StoredMessage } from './sessionStore'
 import type { StoredChunk } from '@/lib/vectorstore/jsonVectorStore'
 
 // /tmp is the only writable path on serverless platforms (Vercel, Lambda).
@@ -45,7 +45,7 @@ export class FileSessionStore implements SessionStore {
       )
       docs = Array.isArray(manifest.docs) ? manifest.docs : []
     } catch {
-      return null
+      /* no manifest yet: a memory-only space may still hold an index */
     }
     let chunks: StoredChunk[] = []
     try {
@@ -54,6 +54,7 @@ export class FileSessionStore implements SessionStore {
     } catch {
       /* no index yet */
     }
+    if (docs.length === 0 && chunks.length === 0) return null
     return { docs, chunks }
   }
 
@@ -95,5 +96,36 @@ export class FileSessionStore implements SessionStore {
       /* already gone */
     }
   }
-}
 
+  async appendDocsAndChunks(
+    sessionId: string,
+    docs: SessionDocRecord[],
+    chunks: StoredChunk[]
+  ): Promise<void> {
+    const snap = (await this.loadSession(sessionId)) ?? { docs: [], chunks: [] }
+    const known = new Set(snap.docs.map((d) => d.url))
+    snap.docs.push(...docs.filter((d) => !known.has(d.url)))
+    snap.chunks.push(...chunks)
+    await this.saveSession(sessionId, snap)
+  }
+
+  async appendMessages(sessionId: string, messages: StoredMessage[]): Promise<void> {
+    const dir = sessionDataDir(sessionId)
+    await fs.promises.mkdir(dir, { recursive: true })
+    const lines = messages.map((m) => JSON.stringify(m)).join('\n') + '\n'
+    await fs.promises.appendFile(path.join(dir, 'messages.jsonl'), lines, 'utf8')
+  }
+
+  async listMessages(sessionId: string, limit: number): Promise<StoredMessage[]> {
+    try {
+      const raw = await fs.promises.readFile(path.join(sessionDataDir(sessionId), 'messages.jsonl'), 'utf8')
+      return raw
+        .split('\n')
+        .filter(Boolean)
+        .map((l) => JSON.parse(l) as StoredMessage)
+        .slice(-limit)
+    } catch {
+      return []
+    }
+  }
+}
