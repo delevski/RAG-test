@@ -1,10 +1,11 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
 import { ownerModeConfigured, ownerTokenMatches } from '@/lib/ai/ownerKey'
-import { OWNER_SESSION_DAYS, cookieHeader, makeOwnerCookieValue, sessionCookieFromRequest } from '@/lib/ownerSession'
+import { OWNER_SESSION_DAYS, cookieHeader, makeOwnerCookieValue, sameOrigin, sessionCookieFromRequest } from '@/lib/ownerSession'
 
 /** GET: is this browser a remembered owner? POST {token}: verify and remember. DELETE: log out. */
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   res.setHeader('Cache-Control', 'no-store')
+  if (req.method !== 'GET' && !sameOrigin(req)) return res.status(403).json({ error: 'Cross-origin request refused' })
   if (req.method === 'GET') return res.status(200).json({ active: sessionCookieFromRequest(req) })
   if (req.method === 'DELETE') {
     res.setHeader('Set-Cookie', cookieHeader('', 0))

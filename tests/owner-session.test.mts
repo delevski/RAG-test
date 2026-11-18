@@ -17,3 +17,10 @@ test('sentinel resolves only with a valid cookie', () => {
   assert.notEqual(resolveOwnerCredential({ headers: {} }, OWNER_SESSION_SENTINEL, env), env.RAG_OWNER_TOKEN)
   assert.equal(resolveOwnerCredential({ headers: {} }, 'typed', env), 'typed')
 })
+test('cross-origin cookie use is refused', () => {
+  const c = `${OWNER_COOKIE}=${makeOwnerCookieValue(Date.now(), env)}`
+  const mk = (extra: any) => ({ method: 'POST', headers: { cookie: c, host: 'rag.ordel.dev', ...extra } })
+  assert.equal(resolveOwnerCredential(mk({ origin: 'https://rag.ordel.dev' }), OWNER_SESSION_SENTINEL, env), env.RAG_OWNER_TOKEN)
+  assert.notEqual(resolveOwnerCredential(mk({ origin: 'https://evil.example' }), OWNER_SESSION_SENTINEL, env), env.RAG_OWNER_TOKEN)
+  assert.notEqual(resolveOwnerCredential(mk({ 'sec-fetch-site': 'cross-site' }), OWNER_SESSION_SENTINEL, env), env.RAG_OWNER_TOKEN)
+})

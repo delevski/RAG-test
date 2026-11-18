@@ -41,6 +41,17 @@ export function cookieHeader(value: string, maxAgeSec: number): string {
   return `${OWNER_COOKIE}=${value}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${maxAgeSec}`
 }
 
+/** Same-origin check for cookie-authenticated requests (defence in depth on top of SameSite=Strict). */
+export function sameOrigin(req: { method?: string; headers?: Record<string, any> }): boolean {
+  const h = req.headers ?? {}
+  if (h['sec-fetch-site'] === 'cross-site') return false
+  const origin = h.origin
+  if (typeof origin === 'string' && origin !== 'null') {
+    try { if (new URL(origin).host !== h.host) return false } catch { return false }
+  } else if (origin === 'null') return false
+  return true
+}
+
 export function sessionCookieFromRequest(req: { headers?: Record<string, any> }, env: NodeJS.ProcessEnv = process.env): boolean {
   return ownerCookieValid(readCookie(req.headers?.cookie, OWNER_COOKIE), Date.now(), env)
 }
@@ -56,7 +67,7 @@ export function resolveOwnerCredential(
   env: NodeJS.ProcessEnv = process.env
 ): unknown {
   if (presented === OWNER_SESSION_SENTINEL) {
-    return sessionCookieFromRequest(req, env) ? env.RAG_OWNER_TOKEN : '__expired_session__'
+    return sameOrigin(req as any) && sessionCookieFromRequest(req, env) ? env.RAG_OWNER_TOKEN : '__expired_session__'
   }
   return presented
 }
