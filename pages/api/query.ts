@@ -40,6 +40,10 @@ export const config = {
   },
 }
 
+/** Tells the model memory really is on, so it never claims it cannot remember across chats. */
+const BRAIN_MEMORY_NOTICE =
+  '(Memory is ON: every statement the user makes is saved automatically as a note and is available in all future conversations. Never say you cannot remember across conversations. The notes below are what is saved so far.)'
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') return res.status(405).end('Method not allowed')
   const { sessionId, query, expectContext, anthropicKey, ownerToken, history, conversationId } = req.body as {
@@ -118,7 +122,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const store = await getSessionStore()
       const all = await store.listNotes(sessionId)
       const chosen = selectNotes(all, query)
-      notesText = formatNotes(chosen, all.length - chosen.length)
+      notesText =
+        BRAIN_MEMORY_NOTICE + '\n' + formatNotes(chosen, all.length - chosen.length)
     }
     const { sources } = await runRagQuery(
       sessionId,
