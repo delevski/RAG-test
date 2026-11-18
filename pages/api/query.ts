@@ -1,4 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
+import { resolveOwnerCredential } from '@/lib/ownerSession'
 import { validateAnthropicKey } from '@/lib/ai/byok'
 import {
   resolveClaudeKey,
@@ -81,7 +82,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   //    request, never persisted or logged.
   let claude: { key: string; source: 'owner' | 'byok' } | null = null
   try {
-    const resolved = resolveClaudeKey({ ownerToken, anthropicKey })
+    const resolved = resolveClaudeKey({ ownerToken: resolveOwnerCredential(req, ownerToken), anthropicKey })
     if (resolved.source === 'owner') claude = { key: resolved.key, source: 'owner' }
     else if (resolved.source === 'byok') {
       claude = { key: validateAnthropicKey(resolved.key) as string, source: 'byok' }

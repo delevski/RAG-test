@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
+import { OWNER_SESSION_SENTINEL } from '@/lib/ownerSessionId'
 
 type Eval = { id: string; title: string; why: string; pass: boolean; detail: string }
 type Lab = { demo?: boolean; driver: string; mockMode: boolean; metrics: Record<string, number>; recent: any[]; eval: Eval[] }
@@ -15,13 +16,17 @@ export default function LabPage() {
   const [err, setErr] = useState('')
 
   useEffect(() => {
-    fetch('/api/brain/lab').then(async (r) => { if (r.ok) setLab(await r.json()) }).catch(() => {})
+    fetch('/api/brain/lab', { headers: { 'x-owner-token': OWNER_SESSION_SENTINEL } }).then(async (r) => { if (r.ok) { setToken(OWNER_SESSION_SENTINEL); setLab(await r.json()) } }).catch(() => {})
   }, [])
 
   async function load() {
     setErr('')
-    const r = await fetch('/api/brain/lab', { headers: { 'x-owner-token': token } })
+    const typed = token
+    const s = await fetch('/api/owner/session', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: typed }) }).catch(() => null)
+    const use = s?.ok ? OWNER_SESSION_SENTINEL : typed
+    const r = await fetch('/api/brain/lab', { headers: { 'x-owner-token': use } })
     if (!r.ok) return setErr('נדרשת סיסמת בעלים')
+    setToken(use)
     setLab(await r.json())
   }
   async function ask() {
@@ -42,7 +47,7 @@ export default function LabPage() {
       <h1 className="text-2xl font-semibold text-white">מעבדת המוח השני</h1>
       <p className="text-slate-400">
         כאן רואים איך שאלה עוברת במוח: אילו זיכרונות נשלפים, מה נמדד בכל בקשה, והאם שלב השליפה נכון.
-        שום דבר כאן לא קורא למודל AI, ולכן זה בחינם. הסיסמה נשארת רק בלשונית הזו.
+        שום דבר כאן לא קורא למודל AI, ולכן זה בחינם. הכניסה נשמרת במכשיר הזה ל-30 יום, בלי לשמור את הסיסמה עצמה.
       </p>
 
       {lab?.demo && (
@@ -52,10 +57,10 @@ export default function LabPage() {
       )}
 
       {!lab && (
-        <div className={card + ' flex gap-2'}>
+        <div className={card + ' flex flex-wrap gap-2'}>
           <input type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder="סיסמת בעלים" dir="ltr"
-            className="flex-1 rounded-lg border border-white/10 bg-black/30 px-3 py-2" />
-          <button onClick={load} className="rounded-lg bg-indigo-500 px-4 py-2 text-white">פתח מעבדה</button>
+            className="min-w-0 flex-1 basis-40 rounded-lg border border-white/10 bg-black/30 px-3 py-2" />
+          <button onClick={load} className="shrink-0 whitespace-nowrap rounded-lg bg-indigo-500 px-4 py-2 text-white">פתח מעבדה</button>
         </div>
       )}
       {err && <p className="text-red-400">{err}</p>}
@@ -66,8 +71,8 @@ export default function LabPage() {
             <h2 className="mb-2 text-lg font-medium text-white">1. עוקבים אחרי שאלה (בלי קריאת AI)</h2>
             <div className="flex gap-2">
               <input value={question} onChange={(e) => setQuestion(e.target.value)} placeholder="שאל משהו שהמוח אולי יודע"
-                className="flex-1 rounded-lg border border-white/10 bg-black/30 px-3 py-2" />
-              <button onClick={ask} className="rounded-lg bg-indigo-500 px-4 py-2 text-white">עקוב</button>
+                className="min-w-0 flex-1 rounded-lg border border-white/10 bg-black/30 px-3 py-2" />
+              <button onClick={ask} className="shrink-0 whitespace-nowrap rounded-lg bg-indigo-500 px-4 py-2 text-white">עקוב</button>
             </div>
             {trace && (
               <ol className="mt-3 list-decimal space-y-2 pl-5">

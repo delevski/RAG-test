@@ -1,5 +1,6 @@
 "use client"
 
+import { OWNER_SESSION_SENTINEL } from '@/lib/ownerSessionId'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Sidebar from '@/components/Sidebar'
 import FileUpload, { type UploadedDoc } from '@/components/FileUpload'
@@ -24,6 +25,11 @@ export default function HomePage() {
   // Owner mode: the owner's passphrase, also memory-only. When set, the
   // server uses its own stored key instead of a visitor-entered one.
   const [ownerToken, setOwnerToken] = useState('')
+  // Remembered login: a server-set HttpOnly cookie. The browser then sends a
+  // placeholder instead of the passphrase, which is never stored client-side.
+  useEffect(() => {
+    fetch('/api/owner/session').then((r) => r.json()).then((j) => { if (j?.active) setOwnerToken(OWNER_SESSION_SENTINEL) }).catch(() => {})
+  }, [])
   const [keyPanelOpen, setKeyPanelOpen] = useState(false)
   // Owner mode switches to the one permanent, owner-only second brain. Visitors
   // never see it: the server rejects its id without the owner passphrase.
@@ -369,14 +375,23 @@ export default function HomePage() {
         <ClaudeKeyPanel
           currentKey={anthropicKey}
           currentOwnerToken={ownerToken}
-          onSave={(k, t) => {
+          onSave={async (k, t) => {
             setAnthropicKey(k)
-            setOwnerToken(t)
+            if (t) {
+              const r = await fetch('/api/owner/session', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ token: t }),
+              }).catch(() => null)
+              // Cookie set: use the placeholder. If cookies fail, fall back to this tab only.
+              setOwnerToken(r?.ok ? OWNER_SESSION_SENTINEL : t)
+            } else setOwnerToken('')
             setKeyPanelOpen(false)
           }}
           onClear={() => {
             setAnthropicKey('')
             setOwnerToken('')
+            fetch('/api/owner/session', { method: 'DELETE' }).catch(() => {})
             setKeyPanelOpen(false)
           }}
           onClose={() => setKeyPanelOpen(false)}
@@ -395,7 +410,7 @@ function ClaudeKeyPanel({
 }: {
   currentKey: string
   currentOwnerToken: string
-  onSave: (key: string, ownerToken: string) => void
+  onSave: (key: string, ownerToken: string) => void | Promise<void>
   onClear: () => void
   onClose: () => void
 }) {
@@ -463,7 +478,7 @@ function ClaudeKeyPanel({
         <div className="border-t border-[var(--border)] pt-3 space-y-2">
           <p className="text-xs text-dim leading-relaxed">
             Site owner? Enter the owner passphrase to answer with the site&rsquo;s own key.
-            The passphrase also stays in this tab only.
+            After the first login this browser stays logged in for 30 days; the passphrase itself is not stored. &quot;Disconnect&quot; logs out.
           </p>
           <label
             htmlFor="owner-token-input"
@@ -495,7 +510,7 @@ function ClaudeKeyPanel({
             onClick={() => onSave(ownerValue.length > 0 ? '' : value, ownerValue)}
             className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-white disabled:opacity-40"
           >
-            Connect for this tab
+            Connect
           </button>
         </div>
       </div>
