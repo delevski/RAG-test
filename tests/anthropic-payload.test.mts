@@ -1,8 +1,9 @@
-// Payload regression test: @langchain/anthropic 0.3.x defaults topP/topK to
-// -1 and sends them; current Claude models reject `top_p: -1` with a 400
-// (observed in production logs, req_011ChA1BnQNTQADW24LrRPFm). The ragChain
-// BYOK/owner path must omit both. Captures the real outgoing request body
-// through a fetch stub: no network, no paid AI.
+// Payload regression test: current Claude models reject sampling params -
+// `top_p: -1` (@langchain/anthropic 0.3.x default, production log
+// req_011ChA1BnQNTQADW24LrRPFm) and `temperature` ("deprecated for this
+// model", req_011ChA3HhXq5Hw16wkjrFeuW). The ragChain BYOK/owner path must
+// omit all three. Captures the real outgoing request body through a fetch
+// stub: no network, no paid AI.
 import assert from 'node:assert/strict'
 import { runRagQuery } from '../lib/langchain/ragChain'
 
@@ -25,11 +26,18 @@ try {
   assert.equal(out, 'hi')
   assert.equal(calls.length, 1, 'exactly one provider call')
   const params = calls[0].body
+  assert.ok(!('temperature' in params), `temperature must be omitted, got ${params.temperature}`)
   assert.ok(!('top_p' in params), `top_p must be omitted, got ${params.top_p}`)
   assert.ok(!('top_k' in params), `top_k must be omitted, got ${params.top_k}`)
+  assert.ok(!('thinking' in params), `thinking must be omitted, got ${JSON.stringify(params.thinking)}`)
+  assert.deepEqual(
+    Object.keys(params).sort(),
+    ['max_tokens', 'messages', 'model', 'stream', 'system'],
+    `request must carry only required fields, got ${Object.keys(params).sort()}`
+  )
   assert.equal(params.max_tokens, 2048)
   assert.equal(params.stream, true)
-  console.log('anthropic-payload: OK (top_p/top_k omitted from outgoing request)')
+  console.log('anthropic-payload: OK (sampling params + thinking omitted; only required fields sent)')
 } finally {
   globalThis.fetch = realFetch
 }
