@@ -478,7 +478,7 @@ function ClaudeKeyPanel({
         <div className="border-t border-[var(--border)] pt-3 space-y-2">
           <p className="text-xs text-dim leading-relaxed">
             Site owner? Enter the owner passphrase to answer with the site&rsquo;s own key.
-            After the first login this browser stays logged in for 30 days; the passphrase itself is not stored. &quot;Clear&quot; logs out.
+            After the first login this browser stays logged in for 30 days; the passphrase itself is not stored. &quot;Disconnect&quot; logs out.
           </p>
           <label
             htmlFor="owner-token-input"
@@ -510,7 +510,7 @@ function ClaudeKeyPanel({
             onClick={() => onSave(ownerValue.length > 0 ? '' : value, ownerValue)}
             className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-white disabled:opacity-40"
           >
-            Connect for this tab
+            Connect
           </button>
         </div>
       </div>
