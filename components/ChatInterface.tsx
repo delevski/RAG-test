@@ -20,6 +20,8 @@ import {
 
 const GREETING_NO_DOCS =
   'Hello! I can help you with questions or chat. Upload documents to enable research mode, or just ask me anything!'
+const GREETING_BRAIN =
+  'Your second brain is on. Tell me things or upload files and I will keep them across sessions - ask me about any of it later.'
 const GREETING_WITH_DOCS =
   'What exactly would you like to research or learn from these documents?'
 
@@ -113,6 +115,9 @@ export default function ChatInterface({
   onReindex,
   anthropicKey,
   ownerToken,
+  brain = false,
+  conversationId,
+  onTurnDone,
 }: {
   sessionId: string
   docs: DocItem[]
@@ -122,11 +127,17 @@ export default function ChatInterface({
   anthropicKey?: string
   /** Owner passphrase unlocking the server-side key, memory-only. */
   ownerToken?: string
+  /** Second-brain mode: history lives on the server, not in this browser. */
+  brain?: boolean
+  /** Second brain: which saved conversation this chat belongs to. */
+  conversationId?: string
+  /** Fires after an answer finished and was saved (lets side panels refresh). */
+  onTurnDone?: () => void
 }) {
   const hasDocs = useMemo(() => docs.length > 0, [docs])
   const hasReadyDocs = useMemo(() => docs.some((d) => d.status === 'ready'), [docs])
   const [messages, setMessages] = useState<ChatMessage[]>([
-    { id: 'greeting', role: 'system', content: GREETING_NO_DOCS },
+    { id: 'greeting', role: 'system', content: brain ? GREETING_BRAIN : GREETING_NO_DOCS },
   ])
   const [hydrated, setHydrated] = useState(false)
   const [input, setInput] = useState('')
@@ -139,8 +150,40 @@ export default function ChatInterface({
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const lastUserQuery = useRef<string | null>(null)
 
-  // Restore history for this session (client-side convenience only).
+  const messagesRef = useRef<ChatMessage[]>(messages)
+  messagesRef.current = messages
+
+  // Restore history. Visitor sessions: this browser only (localStorage).
+  // Second brain: the server's saved conversation, so a new tab, device or
+  // session continues where the last one stopped. Brain chats are never
+  // copied into localStorage.
   useEffect(() => {
+    if (brain) {
+      let cancelled = false
+      fetch(`/api/brain/conversations?id=${encodeURIComponent(conversationId ?? 'default')}`, {
+        headers: ownerToken ? { 'x-owner-token': ownerToken } : {},
+      })
+        .then((r) => (r.ok ? r.json() : { messages: [] }))
+        .then((d: { messages?: Array<{ role: 'user' | 'assistant'; content: string; sources?: Citation[] }> }) => {
+          if (cancelled || !Array.isArray(d.messages) || d.messages.length === 0) return
+          setMessages((prev) => [
+            prev[0]?.role === 'system' ? prev[0] : { id: 'greeting', role: 'system', content: GREETING_BRAIN },
+            ...d.messages!.map((m) => ({
+              id: crypto.randomUUID(),
+              role: m.role,
+              content: m.content,
+              sources: m.sources,
+            })),
+          ])
+        })
+        .catch(() => {})
+        .finally(() => {
+          if (!cancelled) setHydrated(true)
+        })
+      return () => {
+        cancelled = true
+      }
+    }
     try {
       const raw = localStorage.getItem(storageKey(sessionId))
       if (raw) {
@@ -153,28 +196,28 @@ export default function ChatInterface({
       /* corrupted storage - start fresh */
     }
     setHydrated(true)
-  }, [sessionId])
+  }, [sessionId, brain, ownerToken, conversationId])
 
   useEffect(() => {
-    if (!hydrated) return
+    if (!hydrated || brain) return
     try {
       localStorage.setItem(storageKey(sessionId), JSON.stringify(messages.slice(-100)))
     } catch {
       /* storage full - ignore */
     }
-  }, [messages, sessionId, hydrated])
+  }, [messages, sessionId, hydrated, brain])
 
   // Keep the greeting in sync with whether documents exist.
   useEffect(() => {
     setMessages((prev) => {
       const first = prev[0]
       if (first?.role === 'system') {
-        const next = hasDocs ? GREETING_WITH_DOCS : GREETING_NO_DOCS
+        const next = brain ? GREETING_BRAIN : hasDocs ? GREETING_WITH_DOCS : GREETING_NO_DOCS
         if (first.content !== next) return [{ ...first, content: next }, ...prev.slice(1)]
       }
       return prev
     })
-  }, [hasDocs])
+  }, [hasDocs, brain])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -214,6 +257,12 @@ export default function ChatInterface({
             sessionId,
             query: text,
             expectContext: hasReadyDocs,
+            ...(brain && conversationId ? { conversationId } : {}),
+            // Earlier turns of this chat, so follow-ups and facts just told resolve.
+            history: messagesRef.current
+              .filter((x) => x.id !== userMsg.id && (x.role === 'user' || x.role === 'assistant') && !x.failed && x.content.trim().length > 0)
+              .slice(-12)
+              .map((x) => ({ role: x.role, content: x.content })),
             ...(anthropicKey ? { anthropicKey } : {}),
             ...(ownerToken ? { ownerToken } : {}),
           }),
@@ -263,6 +312,7 @@ export default function ChatInterface({
         setMessages((m) =>
           m.map((x) => (x.id === assistantId ? { ...x, content: finalContent, sources } : x))
         )
+        onTurnDone?.()
       } catch (err: any) {
         if (err?.name === 'AbortError') {
           setMessages((m) =>
@@ -289,7 +339,7 @@ export default function ChatInterface({
         setPhase(null)
       }
     },
-    [input, isStreaming, sessionId, hasReadyDocs, awaitReady, docs, anthropicKey, ownerToken]
+    [input, isStreaming, sessionId, hasReadyDocs, awaitReady, docs, anthropicKey, ownerToken, brain, conversationId, onTurnDone]
   )
 
   const handleReindex = useCallback(async () => {

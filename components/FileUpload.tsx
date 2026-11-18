@@ -14,10 +14,12 @@ export default function FileUpload({
   onComplete,
   sessionId,
   compact = false,
+  ownerToken,
 }: {
   onComplete: (files: UploadedDoc[]) => void
   sessionId: string
   compact?: boolean
+  ownerToken?: string
 }) {
   const [isDragging, setIsDragging] = useState(false)
   const [progress, setProgress] = useState<number | null>(null)
@@ -48,7 +50,7 @@ export default function FileUpload({
       for (const file of files) {
         try {
           setCurrentFile(file.name)
-          const { url } = await uploadToLocal(file, sessionId, (p) => setProgress(p))
+          const { url } = await uploadToLocal(file, sessionId, (p) => setProgress(p), ownerToken)
           uploaded.push({ name: file.name, url, size: file.size, type: file.type })
         } catch (err: any) {
           setError(err?.message ?? `Failed to upload ${file.name}`)
@@ -60,7 +62,7 @@ export default function FileUpload({
       setUploading(false)
       if (uploaded.length) onComplete(uploaded)
     },
-    [onComplete, sessionId]
+    [onComplete, sessionId, ownerToken]
   )
 
   const handleDrop = useCallback(

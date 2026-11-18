@@ -1,4 +1,11 @@
-import type { SessionDocRecord, SessionSnapshot, SessionStore } from './sessionStore'
+import type {
+  SessionDocRecord,
+  SessionSnapshot,
+  SessionStore,
+  StoredConversation,
+  StoredMessage,
+  StoredNote,
+} from './sessionStore'
 import type { StoredChunk } from '@/lib/vectorstore/jsonVectorStore'
 import { assertValidSessionId } from './fileStore'
 
@@ -55,6 +62,30 @@ export class NeonSessionStore implements SessionStore {
           embedding jsonb NOT NULL,
           PRIMARY KEY (session_id, idx)
         )`
+        await this.sql`CREATE TABLE IF NOT EXISTS rag_messages (
+          session_id text NOT NULL,
+          conversation_id text NOT NULL DEFAULT 'default',
+          id bigserial PRIMARY KEY,
+          role text NOT NULL,
+          content text NOT NULL,
+          sources jsonb,
+          created_at timestamptz NOT NULL DEFAULT now()
+        )`
+        await this.sql`CREATE INDEX IF NOT EXISTS rag_messages_session_idx ON rag_messages (session_id, conversation_id, id)`
+        await this.sql`CREATE TABLE IF NOT EXISTS rag_notes (
+          id bigserial PRIMARY KEY,
+          session_id text NOT NULL,
+          text text NOT NULL,
+          created_at timestamptz NOT NULL DEFAULT now()
+        )`
+        await this.sql`CREATE INDEX IF NOT EXISTS rag_notes_session_idx ON rag_notes (session_id, id)`
+        await this.sql`CREATE TABLE IF NOT EXISTS rag_events (
+          id bigserial PRIMARY KEY,
+          session_id text NOT NULL,
+          created_at timestamptz NOT NULL DEFAULT now(),
+          event jsonb NOT NULL
+        )`
+        await this.sql`CREATE INDEX IF NOT EXISTS rag_events_session_idx ON rag_events (session_id, id)`
         await this.sql`CREATE TABLE IF NOT EXISTS rag_files (
           session_id text NOT NULL,
           filename text NOT NULL,
@@ -72,10 +103,11 @@ export class NeonSessionStore implements SessionStore {
     const docRows = await this.sql`
       SELECT url, filename, name, size, mime FROM rag_docs
       WHERE session_id = ${sessionId} ORDER BY created_at ASC`
-    if (docRows.length === 0) return null
     const chunkRows = await this.sql`
       SELECT content, metadata, embedding FROM rag_chunks
       WHERE session_id = ${sessionId} ORDER BY idx ASC`
+    // Memory-only spaces (second brain) can hold chunks before any document.
+    if (docRows.length === 0 && chunkRows.length === 0) return null
     const docs: SessionDocRecord[] = docRows.map((r: any) => ({
       url: r.url,
       filename: r.filename,
@@ -150,5 +182,159 @@ export class NeonSessionStore implements SessionStore {
     if (rows.length === 0) return null
     const c = rows[0].content
     return Buffer.isBuffer(c) ? c : Buffer.from(c)
+  }
+
+  async appendDocsAndChunks(
+    sessionId: string,
+    docs: SessionDocRecord[],
+    chunks: StoredChunk[]
+  ): Promise<void> {
+    assertValidSessionId(sessionId)
+    await this.ensureSchema()
+    const queries: any[] = []
+    for (const d of docs) {
+      queries.push(this.sql`
+        INSERT INTO rag_docs (session_id, url, filename, name, size, mime)
+        VALUES (${sessionId}, ${d.url}, ${d.filename}, ${d.name ?? null},
+                ${d.size ?? null}, ${d.type ?? null})
+        ON CONFLICT (session_id, url) DO NOTHING`)
+    }
+    // idx continues after the current maximum; computed inside each INSERT so
+    // appended rows can never collide with or overwrite existing chunks.
+    for (const ch of chunks) {
+      queries.push(this.sql`
+        INSERT INTO rag_chunks (session_id, idx, content, metadata, embedding)
+        VALUES (${sessionId},
+                (SELECT COALESCE(MAX(idx), -1) + 1 FROM rag_chunks WHERE session_id = ${sessionId}),
+                ${ch.content},
+                ${JSON.stringify(ch.metadata ?? {})}::jsonb,
+                ${JSON.stringify(ch.embedding)}::jsonb)`)
+    }
+    if (queries.length === 0) return
+    if (this.sql.transaction) await this.sql.transaction(queries)
+    else for (const q of queries) await q
+  }
+
+  async appendMessages(
+    sessionId: string,
+    conversationId: string,
+    messages: StoredMessage[]
+  ): Promise<void> {
+    assertValidSessionId(sessionId)
+    await this.ensureSchema()
+    const queries: any[] = messages.map((m) => this.sql`
+      INSERT INTO rag_messages (session_id, conversation_id, role, content, sources, created_at)
+      VALUES (${sessionId}, ${conversationId}, ${m.role}, ${m.content},
+              ${m.sources ? JSON.stringify(m.sources) : null}::jsonb, ${m.ts}::timestamptz)`)
+    if (queries.length === 0) return
+    if (this.sql.transaction) await this.sql.transaction(queries)
+    else for (const q of queries) await q
+  }
+
+  async listMessages(
+    sessionId: string,
+    conversationId: string,
+    limit: number
+  ): Promise<StoredMessage[]> {
+    assertValidSessionId(sessionId)
+    await this.ensureSchema()
+    const rows = await this.sql`
+      SELECT role, content, sources, created_at FROM rag_messages
+      WHERE session_id = ${sessionId} AND conversation_id = ${conversationId}
+      ORDER BY id DESC LIMIT ${limit}`
+    return rows.reverse().map((r: any) => ({
+      role: r.role,
+      content: r.content,
+      ts: new Date(r.created_at).toISOString(),
+      sources: r.sources == null ? undefined : typeof r.sources === 'string' ? JSON.parse(r.sources) : r.sources,
+    }))
+  }
+
+  async listConversations(sessionId: string): Promise<StoredConversation[]> {
+    assertValidSessionId(sessionId)
+    await this.ensureSchema()
+    const rows = await this.sql`
+      SELECT conversation_id AS id, count(*) AS n, max(created_at) AS updated_at,
+             (array_agg(content ORDER BY id ASC) FILTER (WHERE role = 'user'))[1] AS first_user
+      FROM rag_messages WHERE session_id = ${sessionId}
+      GROUP BY conversation_id ORDER BY max(created_at) DESC LIMIT 100`
+    return rows.map((r: any) => ({
+      id: r.id,
+      title: String(r.first_user ?? 'Conversation').replace(/\s+/g, ' ').slice(0, 80),
+      updatedAt: new Date(r.updated_at).toISOString(),
+      count: Number(r.n),
+    }))
+  }
+
+  async deleteConversation(sessionId: string, conversationId: string): Promise<void> {
+    assertValidSessionId(sessionId)
+    await this.ensureSchema()
+    await this.sql`DELETE FROM rag_messages WHERE session_id = ${sessionId} AND conversation_id = ${conversationId}`
+  }
+
+  async addNote(sessionId: string, text: string): Promise<StoredNote> {
+    assertValidSessionId(sessionId)
+    await this.ensureSchema()
+    const rows = await this.sql`
+      INSERT INTO rag_notes (session_id, text) VALUES (${sessionId}, ${text})
+      RETURNING id, text, created_at`
+    const r = rows[0]
+    return { id: String(r.id), text: r.text, ts: new Date(r.created_at).toISOString() }
+  }
+
+  async listNotes(sessionId: string): Promise<StoredNote[]> {
+    assertValidSessionId(sessionId)
+    await this.ensureSchema()
+    const rows = await this.sql`
+      SELECT id, text, created_at FROM rag_notes WHERE session_id = ${sessionId}
+      ORDER BY id ASC LIMIT 2000`
+    return rows.map((r: any) => ({ id: String(r.id), text: r.text, ts: new Date(r.created_at).toISOString() }))
+  }
+
+  async scrubStatement(sessionId: string, text: string): Promise<number> {
+    assertValidSessionId(sessionId)
+    await this.ensureSchema()
+    const rows = await this.sql`
+      WITH u AS (
+        SELECT id, conversation_id FROM rag_messages
+        WHERE session_id = ${sessionId} AND role = 'user' AND left(content, 1000) = ${text}
+      ), a AS (
+        SELECT DISTINCT ON (u.id) m.id FROM u
+        JOIN rag_messages m ON m.session_id = ${sessionId} AND m.conversation_id = u.conversation_id
+          AND m.id > u.id
+        ORDER BY u.id, m.id
+      )
+      DELETE FROM rag_messages
+      WHERE session_id = ${sessionId}
+        AND (id IN (SELECT id FROM u) OR id IN (SELECT id FROM a WHERE id IN (SELECT id FROM rag_messages WHERE role = 'assistant')))
+      RETURNING id`
+    return rows.length
+  }
+
+  async deleteNote(sessionId: string, noteId: string): Promise<boolean> {
+    assertValidSessionId(sessionId)
+    if (!/^[0-9]{1,18}$/.test(noteId)) return false
+    await this.ensureSchema()
+    const rows = await this.sql`
+      DELETE FROM rag_notes WHERE session_id = ${sessionId} AND id = ${noteId}::bigint RETURNING id`
+    return rows.length > 0
+  }
+
+  async addEvent(sessionId: string, event: import('@/lib/events').RagEvent): Promise<void> {
+    assertValidSessionId(sessionId)
+    await this.ensureSchema()
+    await this.sql`INSERT INTO rag_events (session_id, event) VALUES (${sessionId}, ${JSON.stringify(event)}::jsonb)`
+    // Keep the log small: only the newest 500 events per session.
+    await this.sql`DELETE FROM rag_events WHERE session_id = ${sessionId} AND id <= (
+      SELECT COALESCE(MAX(id), 0) - 500 FROM rag_events WHERE session_id = ${sessionId})`
+  }
+
+  async listEvents(sessionId: string, limit: number): Promise<import('@/lib/events').RagEvent[]> {
+    assertValidSessionId(sessionId)
+    await this.ensureSchema()
+    const rows = await this.sql`
+      SELECT event FROM (SELECT id, event FROM rag_events WHERE session_id = ${sessionId}
+        ORDER BY id DESC LIMIT ${limit}) t ORDER BY id ASC`
+    return rows.map((r: any) => (typeof r.event === 'string' ? JSON.parse(r.event) : r.event))
   }
 }

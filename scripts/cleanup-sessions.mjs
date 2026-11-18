@@ -4,6 +4,7 @@
  * schedule (e.g. Vercel Cron daily) or manually:
  *   RAG_DATABASE_URL=postgres://... node scripts/cleanup-sessions.mjs
  * Storage is bounded by design: 10 docs/session x ~4.5 MB upload cap, so a
+ * The reserved 'owner-brain' space is NEVER expired by this script.
  * session can never exceed ~45 MB of file bytes plus chunk text.
  */
 import { neon } from '@neondatabase/serverless'
@@ -18,6 +19,7 @@ const sql = neon(url)
 
 const expired = await sql`
   SELECT session_id FROM rag_docs
+  WHERE session_id <> 'owner-brain'
   GROUP BY session_id
   HAVING max(created_at) < now() - make_interval(days => ${ttlDays})`
 for (const row of expired) {

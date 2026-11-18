@@ -35,6 +35,17 @@ export type SessionSnapshot = {
   chunks: StoredChunk[]
 }
 
+export type StoredMessage = {
+  role: 'user' | 'assistant'
+  content: string
+  /** ISO timestamp. */
+  ts: string
+  sources?: Array<{ name: string; snippet: string }>
+}
+
+export type StoredConversation = { id: string; title: string; updatedAt: string; count: number }
+export type StoredNote = { id: string; text: string; ts: string }
+
 export interface SessionStore {
   readonly driver: 'file' | 'neon'
   loadSession(sessionId: string): Promise<SessionSnapshot | null>
@@ -42,6 +53,33 @@ export interface SessionStore {
   putFile(sessionId: string, filename: string, content: Buffer): Promise<void>
   getFile(sessionId: string, filename: string): Promise<Buffer | null>
   deleteFile(sessionId: string, filename: string): Promise<void>
+  /**
+   * Incremental write (second brain): add docs and chunks WITHOUT rewriting
+   * what is already stored, so a growing knowledge base never gets reshuffled.
+   */
+  appendDocsAndChunks(
+    sessionId: string,
+    docs: SessionDocRecord[],
+    chunks: StoredChunk[]
+  ): Promise<void>
+  /** Durable chat history per conversation, oldest first (the last `limit` messages). */
+  appendMessages(sessionId: string, conversationId: string, messages: StoredMessage[]): Promise<void>
+  listMessages(sessionId: string, conversationId: string, limit: number): Promise<StoredMessage[]>
+  listConversations(sessionId: string): Promise<StoredConversation[]>
+  deleteConversation(sessionId: string, conversationId: string): Promise<void>
+  /** Memory notes (second brain): plain facts the owner told the brain. */
+  addNote(sessionId: string, text: string): Promise<StoredNote>
+  listNotes(sessionId: string): Promise<StoredNote[]>
+  deleteNote(sessionId: string, noteId: string): Promise<boolean>
+  /**
+   * Forgetting: remove saved chat messages where the user said exactly this
+   * statement (compared on the first 1000 chars, like notes) and the assistant
+   * reply directly after each. Returns how many messages were removed.
+   */
+  scrubStatement(sessionId: string, text: string): Promise<number>
+  /** Counts-and-timings only request log (see lib/events.ts). Newest last. */
+  addEvent(sessionId: string, event: import('@/lib/events').RagEvent): Promise<void>
+  listEvents(sessionId: string, limit: number): Promise<import('@/lib/events').RagEvent[]>
 }
 
 let active: SessionStore | null = null
@@ -50,7 +88,9 @@ export async function getSessionStore(): Promise<SessionStore> {
   if (active) return active
   const pgUrl =
     process.env.RAG_DATABASE_URL || process.env.RAG_DATABASE_POSTGRES_URL
-  if (pgUrl) {
+  // RAG_FORCE_FILE_STORE=1 isolates a demo deployment from any database:
+  // temporary files only, so it can never show the owner's saved notes.
+  if (pgUrl && process.env.RAG_FORCE_FILE_STORE !== '1') {
     const { NeonSessionStore } = await import('./neonStore')
     active = new NeonSessionStore(pgUrl)
   } else {
@@ -58,7 +98,7 @@ export async function getSessionStore(): Promise<SessionStore> {
     // so silently falling back would lose every document on the next cold
     // start - the exact bug this layer exists to fix. Preview and local
     // development keep the file driver as the documented demo mode.
-    if (process.env.VERCEL_ENV === 'production' && process.env.RAG_ALLOW_EPHEMERAL !== '1') {
+    if (process.env.RAG_FORCE_FILE_STORE !== '1' && process.env.VERCEL_ENV === 'production' && process.env.RAG_ALLOW_EPHEMERAL !== '1') {
       throw new Error(
         'RAG_STORAGE_UNCONFIGURED: no durable store is configured for Production. ' +
           'Extend RAG_DATABASE_URL / RAG_DATABASE_POSTGRES_URL to the Production environment ' +

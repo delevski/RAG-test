@@ -12,6 +12,10 @@ export default function Sidebar({
   onUploaded,
   onRemoveDoc,
   onRetryDoc,
+  ownerToken,
+  brain = false,
+  onOpenDoc,
+  brainPanel,
 }: {
   uploadedDocs: DocItem[]
   sessionId: string
@@ -19,6 +23,11 @@ export default function Sidebar({
   onUploaded: (files: UploadedDoc[]) => void
   onRemoveDoc: (id: string) => void
   onRetryDoc: (doc: DocItem) => void
+  ownerToken?: string
+  /** Second-brain mode: one permanent space, so there is no "new session". */
+  brain?: boolean
+  onOpenDoc?: (doc: DocItem) => void
+  brainPanel?: React.ReactNode
 }) {
   return (
     <aside className="hidden lg:flex fixed left-0 top-0 h-dvh w-[320px] flex-col border-r border-[var(--border)] bg-[var(--surface)]/70 backdrop-blur-xl z-30">
@@ -31,17 +40,23 @@ export default function Sidebar({
       </div>
 
       <div className="px-4">
-        <button
-          onClick={onNewSession}
-          className="w-full flex items-center justify-center gap-2 rounded-xl gradient-bg text-white text-sm font-medium px-3 py-2.5 shadow-glow hover:brightness-110 active:scale-[0.98] transition"
-        >
-          <PlusIcon className="w-4 h-4" />
-          New Session
-        </button>
+        {brain ? (
+          <div className="w-full rounded-xl border border-emerald-400/30 bg-emerald-400/10 text-emerald-300 text-xs font-medium px-3 py-2.5 text-center">
+            Second brain &middot; saved across sessions
+          </div>
+        ) : (
+          <button
+            onClick={onNewSession}
+            className="w-full flex items-center justify-center gap-2 rounded-xl gradient-bg text-white text-sm font-medium px-3 py-2.5 shadow-glow hover:brightness-110 active:scale-[0.98] transition"
+          >
+            <PlusIcon className="w-4 h-4" />
+            New Session
+          </button>
+        )}
       </div>
 
       <div className="px-4 pt-4">
-        <FileUpload compact sessionId={sessionId} onComplete={onUploaded} />
+        <FileUpload compact sessionId={sessionId} onComplete={onUploaded} ownerToken={ownerToken} />
       </div>
 
       <div className="px-4 pt-5 pb-2 flex items-center justify-between">
@@ -54,7 +69,8 @@ export default function Sidebar({
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 pb-4">
-        <DocList docs={uploadedDocs} onRemove={onRemoveDoc} onRetry={onRetryDoc} />
+        <DocList docs={uploadedDocs} onRemove={onRemoveDoc} onRetry={onRetryDoc} onOpen={onOpenDoc} />
+        {brainPanel && <div className="pt-5">{brainPanel}</div>}
       </div>
     </aside>
   )

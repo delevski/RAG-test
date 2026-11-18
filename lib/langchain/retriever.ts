@@ -16,6 +16,7 @@ import {
   paidAIAllowed,
 } from '@/lib/ai/mock'
 import { getSessionStore } from '@/lib/store/sessionStore'
+import { isBrainSession, BRAIN_MAX_DOCS, BRAIN_MAX_CHUNKS } from '@/lib/brain'
 import {
   assertValidSessionId as assertSession,
   sessionDataDir,
@@ -132,8 +133,12 @@ export async function indexDocuments(
   const newInputs = inputs.filter((d) => !knownUrls.has(d.url))
   const skipped = inputs.filter((d) => knownUrls.has(d.url)).map((d) => d.url)
 
-  if (snapshot.docs.length + newInputs.length > MAX_DOCS_PER_SESSION) {
-    throw new Error(`A session can hold at most ${MAX_DOCS_PER_SESSION} documents`)
+  const brain = isBrainSession(sessionId)
+  const maxDocs = brain ? BRAIN_MAX_DOCS : MAX_DOCS_PER_SESSION
+  const maxChunks = brain ? BRAIN_MAX_CHUNKS : MAX_CHUNKS_PER_SESSION
+  const realDocCount = snapshot.docs.length
+  if (realDocCount + newInputs.length > maxDocs) {
+    throw new Error(`A session can hold at most ${maxDocs} documents`)
   }
 
   if (newInputs.length === 0) {
@@ -176,23 +181,31 @@ export async function indexDocuments(
   }
   const engine = new JsonVectorStore(snapshot.chunks)
 
-  if (engine.size + chunks.length > MAX_CHUNKS_PER_SESSION) {
+  if (engine.size + chunks.length > maxChunks) {
     throw new Error(
-      `Session index is limited to ${MAX_CHUNKS_PER_SESSION} chunks; these documents would exceed it`
+      `Session index is limited to ${maxChunks} chunks; these documents would exceed it`
     )
   }
 
-  await engine.addDocuments(chunks, embeddings)
+  const newRecords = newInputs.map((d) => ({
+    url: d.url,
+    filename: path.basename(d.url.split('?')[0]),
+    name: d.name,
+    size: typeof d.size === 'number' && d.size >= 0 ? d.size : undefined,
+    type: typeof d.type === 'string' ? d.type.slice(0, 200) : undefined,
+  }))
 
-  snapshot.docs.push(
-    ...newInputs.map((d) => ({
-      url: d.url,
-      filename: path.basename(d.url.split('?')[0]),
-      name: d.name,
-      size: typeof d.size === 'number' && d.size >= 0 ? d.size : undefined,
-      type: typeof d.type === 'string' ? d.type.slice(0, 200) : undefined,
-    }))
-  )
+  if (brain) {
+    // Second brain: embed only the NEW chunks and append them; the existing
+    // knowledge is never rewritten.
+    const before = engine.size
+    await engine.addDocuments(chunks, embeddings)
+    await store.appendDocsAndChunks(sessionId, newRecords, engine.toChunks().slice(before))
+    return { indexed: newInputs.map((d) => d.url), skipped, totalChunks: engine.size }
+  }
+
+  await engine.addDocuments(chunks, embeddings)
+  snapshot.docs.push(...newRecords)
   snapshot.chunks = engine.toChunks()
   await store.saveSession(sessionId, snapshot)
 
@@ -257,7 +270,12 @@ export async function listSessionDocs(
  * Similarity search within ONE session's store. Throws when the session has
  * no index — callers decide how to surface that (never silently re-embed).
  */
-export async function searchSession(sessionId: string, query: string, k = 5): Promise<Document[]> {
+export async function searchSession(
+  sessionId: string,
+  query: string,
+  k = 5,
+  opts: { allowEmpty?: boolean } = {}
+): Promise<Document[]> {
   assertValidSessionId(sessionId)
   if (query.length > MAX_QUERY_CHARS) {
     throw new Error(`Query is limited to ${MAX_QUERY_CHARS} characters`)
@@ -265,6 +283,9 @@ export async function searchSession(sessionId: string, query: string, k = 5): Pr
   const store = await getSessionStore()
   const snapshot = await store.loadSession(sessionId)
   if (!snapshot || snapshot.chunks.length === 0) {
+    // The second brain starts empty by design; a visitor session that expects
+    // an index still gets the explicit INDEX_MISSING.
+    if (opts.allowEmpty) return []
     throw new Error('INDEX_MISSING')
   }
   const engine = new JsonVectorStore(snapshot.chunks)

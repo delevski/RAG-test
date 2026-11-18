@@ -1,5 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
 import { assertValidSessionId, listSessionDocs, removeSessionDoc } from '@/lib/langchain/retriever'
+import { assertBrainAccess, BRAIN_FORBIDDEN } from '@/lib/brain'
 
 /**
  * Session-scoped document listing. Lets the client restore its document
@@ -12,6 +13,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     assertValidSessionId(session)
   } catch {
     return res.status(400).json({ error: 'Invalid sessionId' })
+  }
+  try {
+    assertBrainAccess(req, session)
+  } catch (err: any) {
+    if (err?.message === BRAIN_FORBIDDEN) {
+      await new Promise((r) => setTimeout(r, 600))
+      return res.status(403).json({ error: 'Owner passphrase required' })
+    }
+
+    throw err
   }
   try {
     if (req.method === 'DELETE') {

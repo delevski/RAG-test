@@ -26,10 +26,13 @@ export default function DocList({
   docs,
   onRemove,
   onRetry,
+  onOpen,
 }: {
   docs: DocItem[]
   onRemove: (id: string) => void
   onRetry: (doc: DocItem) => void
+  /** When set, the name opens the stored original (owner brain: header-authorized fetch). */
+  onOpen?: (doc: DocItem) => void
 }) {
   if (docs.length === 0) {
     return <div className="text-xs text-dim px-1">No documents uploaded yet.</div>
@@ -50,9 +53,19 @@ export default function DocList({
               <FileIcon className="w-4 h-4" />
             </div>
             <div className="min-w-0 flex-1">
-              <div className="text-xs font-medium truncate" title={d.name}>
-                {d.name}
-              </div>
+              {onOpen && d.status === 'ready' ? (
+                <button
+                  onClick={() => onOpen(d)}
+                  className="block max-w-full text-left text-xs font-medium truncate hover:text-primary hover:underline"
+                  title={`Open ${d.name}`}
+                >
+                  {d.name}
+                </button>
+              ) : (
+                <div className="text-xs font-medium truncate" title={d.name}>
+                  {d.name}
+                </div>
+              )}
               <div className="text-[10px] text-dim flex items-center gap-1.5 mt-0.5">
                 <motion.span
                   key={d.status}

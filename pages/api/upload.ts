@@ -4,6 +4,7 @@ import fs from 'fs'
 import path from 'path'
 import { assertValidSessionId, sessionUploadDir } from '@/lib/langchain/retriever'
 import { getSessionStore } from '@/lib/store/sessionStore'
+import { assertBrainAccess } from '@/lib/brain'
 
 export const config = {
   api: {
@@ -51,6 +52,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         if (p && fs.existsSync(p)) fs.unlinkSync(p)
       }
       return res.status(400).json({ error: 'Invalid sessionId' })
+    }
+
+    // Reserved owner space: header-only auth (body is a multipart stream here).
+    try {
+      assertBrainAccess({ headers: req.headers, body: undefined } as any, rawSession)
+    } catch {
+      await new Promise((r) => setTimeout(r, 600))
+      for (const f of Object.values(files)) {
+        const one = Array.isArray(f) ? f[0] : f
+        const p = (one as any)?.filepath || (one as any)?.path
+        if (p && fs.existsSync(p)) fs.unlinkSync(p)
+      }
+      return res.status(403).json({ error: 'Owner passphrase required' })
     }
 
     const uploadDir = sessionUploadDir(rawSession as string)

@@ -5,6 +5,8 @@ import type { MessageContentComplex, MessageContentText } from '@langchain/core/
 import { formatDocumentsAsString } from 'langchain/util/document'
 import { searchSession } from './retriever'
 import { buildRagPrompt } from '@/utils/promptTemplates'
+import { HumanMessage, AIMessage } from '@langchain/core/messages'
+import type { HistoryTurn } from '@/lib/brain'
 import { mockChatStream, RAG_MOCK_ENABLED, PAID_AI_DISABLED, paidAIAllowed } from '@/lib/ai/mock'
 
 /**
@@ -61,13 +63,26 @@ export async function runRagQuery(
   sessionId: string,
   query: string,
   onToken: (t: string) => void,
-  opts: { expectContext?: boolean; anthropicKey?: string } = {}
+  opts: {
+    expectContext?: boolean
+    anthropicKey?: string
+    /** Recent turns of THIS conversation, so follow-ups and earlier facts resolve. */
+    history?: HistoryTurn[]
+    /** Second brain: retrieval over a possibly empty space is fine, not INDEX_MISSING. */
+    allowEmptyIndex?: boolean
+    /** Pre-formatted saved notes (second brain); '(none)' otherwise. */
+    notes?: string
+    /** Best effort: called with provider-reported token usage when it is available. */
+    onUsage?: (u: { input?: number; output?: number }) => void
+  } = {}
 ): Promise<RagResult> {
   let context = ''
   let sources: SourceCitation[] = []
 
   if (opts.expectContext) {
-    const retrieved = await searchSession(sessionId, query, 5) // throws INDEX_MISSING
+    const retrieved = await searchSession(sessionId, query, 5, {
+      allowEmpty: opts.allowEmptyIndex,
+    }) // throws INDEX_MISSING unless allowEmptyIndex
     if (retrieved.length > 0) {
       context = formatDocumentsAsString(retrieved)
       const seen = new Set<string>()
@@ -82,6 +97,9 @@ export async function runRagQuery(
   }
 
   const prompt = buildRagPrompt()
+  const history = (opts.history ?? []).map((t) =>
+    t.role === 'user' ? new HumanMessage(t.content) : new AIMessage(t.content)
+  )
 
   // BYOK: the visitor supplies their own Anthropic key for this request.
   // The key lives only in this invocation — never persisted, never logged.
@@ -119,7 +137,16 @@ export async function runRagQuery(
       },
     })
     const chain = prompt.pipe(llm).pipe(new TextOnlyOutputParser())
-    const stream = await chain.stream({ context, question: query })
+    const usageCb = {
+      handleLLMEnd: (out: any) => {
+        const um = out?.generations?.[0]?.[0]?.message?.usage_metadata
+        if (um && opts.onUsage) opts.onUsage({ input: um.input_tokens, output: um.output_tokens })
+      },
+    }
+    const stream = await chain.stream(
+      { context, question: query, history, notes: opts.notes ?? '(none)' },
+      { callbacks: [usageCb] }
+    )
     let answered = false
     for await (const chunk of stream) {
       if (typeof chunk === 'string' && chunk.length > 0) {
@@ -153,7 +180,7 @@ export async function runRagQuery(
   })
 
   const chain = prompt.pipe(llm).pipe(new TextOnlyOutputParser())
-  const stream = await chain.stream({ context, question: query })
+  const stream = await chain.stream({ context, question: query, history, notes: opts.notes ?? '(none)' })
 
   let answered = false
   for await (const chunk of stream) {
