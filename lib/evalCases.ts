@@ -67,3 +67,19 @@ export function runEval(): EvalResult[] {
     /selection/.test(BRAIN_MEMORY_NOTICE) && /not among them/.test(BRAIN_MEMORY_NOTICE), BRAIN_MEMORY_NOTICE.slice(0, 80))
   return out
 }
+
+/** Synthetic sample notes for the standalone demo trace (never the owner's notes). */
+export const DEMO_NOTES: N[] = [
+  mk(1, 'My cat is called Pixel.', 1),
+  mk(2, 'The locker code for ZQ417 is blue-heron-88.', 2),
+  mk(3, 'Update: the locker code for ZQ417 is now green-fox-19.', 6),
+  mk(4, 'הקוד של הלוקר בפיקסצ׳ר ZQ417 הוא blue-heron-88', 3),
+]
+
+/**
+ * Open (no passphrase) lab ONLY on a deployment that is explicitly mock-only,
+ * file-store-only and flagged for it. Production lacks the flag, so it stays locked.
+ */
+export function labDemoOpen(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.RAG_LAB_DEMO_OPEN === '1' && env.RAG_MOCK === '1' && env.RAG_FORCE_FILE_STORE === '1'
+}

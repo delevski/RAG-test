@@ -2,7 +2,7 @@ import type { NextApiRequest, NextApiResponse } from 'next'
 import { getSessionStore } from '@/lib/store/sessionStore'
 import { BRAIN_SESSION_ID, guardBrain, selectNotes, formatNotes, BRAIN_MEMORY_NOTICE } from '@/lib/brain'
 import { summarizeEvents } from '@/lib/events'
-import { runEval } from '@/lib/evalCases'
+import { runEval, labDemoOpen, DEMO_NOTES } from '@/lib/evalCases'
 import { RAG_MOCK_ENABLED } from '@/lib/ai/mock'
 
 /**
@@ -11,12 +11,14 @@ import { RAG_MOCK_ENABLED } from '@/lib/ai/mock'
  * calling any AI (zero cost). Header auth only.
  */
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  if (!(await guardBrain(req, res))) return
+  const demo = labDemoOpen()
+  if (!demo && !(await guardBrain(req, res))) return
   try {
     const store = await getSessionStore()
     if (req.method === 'GET') {
       const events = await store.listEvents(BRAIN_SESSION_ID, 500)
       return res.status(200).json({
+        demo,
         driver: store.driver,
         mockMode: RAG_MOCK_ENABLED,
         metrics: summarizeEvents(events),
@@ -27,7 +29,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (req.method === 'POST') {
       const q = String((req.body as any)?.question ?? '').slice(0, 500)
       if (!q.trim()) return res.status(400).json({ error: 'Missing question' })
-      const all = await store.listNotes(BRAIN_SESSION_ID)
+      const all = demo ? DEMO_NOTES : await store.listNotes(BRAIN_SESSION_ID)
       const chosen = selectNotes(all, q)
       return res.status(200).json({
         totalNotes: all.length,

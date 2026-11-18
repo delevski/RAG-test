@@ -1,8 +1,8 @@
 'use client'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 type Eval = { id: string; title: string; why: string; pass: boolean; detail: string }
-type Lab = { driver: string; mockMode: boolean; metrics: Record<string, number>; recent: any[]; eval: Eval[] }
+type Lab = { demo?: boolean; driver: string; mockMode: boolean; metrics: Record<string, number>; recent: any[]; eval: Eval[] }
 type Trace = { totalNotes: number; selected: { date: string; text: string }[]; omitted: number; notesBlock: string }
 
 const card = 'rounded-xl border border-white/10 bg-white/[0.03] p-4'
@@ -13,6 +13,10 @@ export default function LabPage() {
   const [trace, setTrace] = useState<Trace | null>(null)
   const [question, setQuestion] = useState('')
   const [err, setErr] = useState('')
+
+  useEffect(() => {
+    fetch('/api/brain/lab').then(async (r) => { if (r.ok) setLab(await r.json()) }).catch(() => {})
+  }, [])
 
   async function load() {
     setErr('')
@@ -40,6 +44,12 @@ export default function LabPage() {
         כאן רואים איך שאלה עוברת במוח: אילו זיכרונות נשלפים, מה נמדד בכל בקשה, והאם שלב השליפה נכון.
         שום דבר כאן לא קורא למודל AI, ולכן זה בחינם. הסיסמה נשארת רק בלשונית הזו.
       </p>
+
+      {lab?.demo && (
+        <p className="rounded-lg border border-amber-400/30 bg-amber-400/10 p-3 text-amber-200">
+          דמו עצמאי: נתונים סינתטיים ומדומים בלבד (MOCK), בלי Claude ובלי המוח האמיתי של אורי. האחסון בקובץ זמני בשרת ועלול להיעלם בכל רגע.
+        </p>
+      )}
 
       {!lab && (
         <div className={card + ' flex gap-2'}>
@@ -88,12 +98,12 @@ export default function LabPage() {
               ))}
             </div>
             {lab.recent.length > 0 && (
-              <table className="mt-3 w-full text-left text-xs">
+              <div className="mt-3 overflow-x-auto"><table className="w-full min-w-[34rem] whitespace-nowrap text-right text-xs [&_td]:px-2 [&_td]:py-1 [&_th]:px-2 [&_th]:py-1">
                 <thead className="text-slate-400"><tr><th>שעה</th><th>ספק</th><th>ms</th><th>זיכרונות נשלחו/סך הכל</th><th>טוקנים</th><th>תקין</th></tr></thead>
                 <tbody>{lab.recent.map((e, i) => (
                   <tr key={i} className="border-t border-white/5"><td>{String(e.ts).slice(11, 19)}</td><td>{e.provider}</td><td>{e.ms}</td><td>{e.notesSent}/{e.notesTotal}</td><td>{typeof e.tokensIn === 'number' ? `${e.tokensIn}/${e.tokensOut}` : 'לא ידוע'}</td><td>{e.ok ? 'כן' : e.error || 'לא'}</td></tr>
                 ))}</tbody>
-              </table>
+              </table></div>
             )}
             {lab.recent.length === 0 && <p className="mt-2 text-slate-400">עדיין אין בקשות. שוחח במצב בעלים והן יופיעו כאן. טוקנים מוצגים רק כשהספק מדווח עליהם; אחרת &quot;לא ידוע&quot;, לא 0, וללא מחיר מומצא.</p>}
           </section>
