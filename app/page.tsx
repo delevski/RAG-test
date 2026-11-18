@@ -276,7 +276,7 @@ export default function HomePage() {
 
       <main className="h-dvh flex flex-col lg:ml-[320px] pb-[64px] lg:pb-0">
         <header className="shrink-0 sticky top-0 z-20 glass border-x-0 border-t-0 px-4 py-3 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3 min-w-0">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 sm:gap-3 min-w-0">
             <h1 className="text-base sm:text-lg font-semibold tracking-tight truncate">
               Smart Research Assistant
             </h1>
@@ -291,16 +291,26 @@ export default function HomePage() {
               </span>
             )}
             {ownerToken && (
-              <span className="inline-flex items-center rounded-full border border-emerald-400/40 bg-emerald-400/10 px-2.5 py-0.5 text-[10px] font-medium text-emerald-300">
+              <span className="inline-flex shrink-0 items-center whitespace-nowrap rounded-full border border-emerald-400/40 bg-emerald-400/10 px-2.5 py-0.5 text-[10px] font-medium text-emerald-300">
                 Second brain · owner mode
               </span>
             )}
             <button
               onClick={() => setKeyPanelOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border)] bg-white/[0.03] px-2.5 py-0.5 text-[10px] font-medium text-dim hover:border-primary/50 hover:text-white transition-colors"
+              className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-[var(--border)] bg-white/[0.03] px-2.5 py-0.5 text-[10px] font-medium text-dim hover:border-primary/50 hover:text-white transition-colors"
             >
               {anthropicKey || ownerToken ? 'Key settings' : 'Use your Claude key'}
             </button>
+            {ownerToken && (
+              <a
+                href="/lab"
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex shrink-0 items-center whitespace-nowrap rounded-full border border-[var(--border)] bg-white/[0.03] px-2.5 py-0.5 text-[10px] font-medium text-dim hover:border-primary/50 hover:text-white transition-colors"
+              >
+                Lab
+              </a>
+            )}
             <span
               className={`hidden sm:inline-flex items-center rounded-full border px-2.5 py-0.5 text-[10px] font-medium ${
                 readyCount > 0
