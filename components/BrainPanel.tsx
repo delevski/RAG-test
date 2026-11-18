@@ -18,6 +18,7 @@ export default function BrainPanel({
   onSelect,
   onNew,
   onDeletedActive,
+  onForgot,
 }: {
   ownerToken: string
   conversationId: string
@@ -26,6 +27,8 @@ export default function BrainPanel({
   onSelect: (id: string) => void
   onNew: () => void
   onDeletedActive: () => void
+  /** A note was forgotten: reload the open conversation (its matching messages were removed). */
+  onForgot: () => void
 }) {
   const [convs, setConvs] = useState<Conv[] | null>(null)
   const [notes, setNotes] = useState<Note[] | null>(null)
@@ -67,10 +70,13 @@ export default function BrainPanel({
   }
 
   const delNote = async (n: Note) => {
-    if (!window.confirm('Forget this note permanently?\n\n' + n.text.slice(0, 160))) return
+    if (!window.confirm('Forget this note permanently? The chat messages where you said it are removed too.\n\n' + n.text.slice(0, 160))) return
     const r = await fetch(`/api/brain/notes?id=${encodeURIComponent(n.id)}`, { method: 'DELETE', headers })
-    if (r.ok) setNotes((p) => (p ? p.filter((x) => x.id !== n.id) : p))
-    else setError('Could not delete the note')
+    if (r.ok) {
+      setNotes((p) => (p ? p.filter((x) => x.id !== n.id) : p))
+      onForgot()
+      void load()
+    } else setError('Could not delete the note')
   }
 
   const delConv = async (c: Conv) => {

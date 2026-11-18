@@ -284,6 +284,26 @@ export class NeonSessionStore implements SessionStore {
     return rows.map((r: any) => ({ id: String(r.id), text: r.text, ts: new Date(r.created_at).toISOString() }))
   }
 
+  async scrubStatement(sessionId: string, text: string): Promise<number> {
+    assertValidSessionId(sessionId)
+    await this.ensureSchema()
+    const rows = await this.sql`
+      WITH u AS (
+        SELECT id, conversation_id FROM rag_messages
+        WHERE session_id = ${sessionId} AND role = 'user' AND left(content, 1000) = ${text}
+      ), a AS (
+        SELECT DISTINCT ON (u.id) m.id FROM u
+        JOIN rag_messages m ON m.session_id = ${sessionId} AND m.conversation_id = u.conversation_id
+          AND m.id > u.id
+        ORDER BY u.id, m.id
+      )
+      DELETE FROM rag_messages
+      WHERE session_id = ${sessionId}
+        AND (id IN (SELECT id FROM u) OR id IN (SELECT id FROM a WHERE id IN (SELECT id FROM rag_messages WHERE role = 'assistant')))
+      RETURNING id`
+    return rows.length
+  }
+
   async deleteNote(sessionId: string, noteId: string): Promise<boolean> {
     assertValidSessionId(sessionId)
     if (!/^[0-9]{1,18}$/.test(noteId)) return false

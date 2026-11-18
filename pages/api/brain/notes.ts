@@ -4,7 +4,8 @@ import { BRAIN_SESSION_ID, guardBrain, MAX_NOTE_CHARS, MAX_NOTES } from '@/lib/b
 
 /**
  * Owner-only memory notes: list, add, delete. Header auth only.
- * Deleting a note is permanent and is the way to retract a wrong fact.
+ * Deleting a note is permanent and is the way to retract a wrong fact. It also
+ * removes the exact chat messages that stated it (see scrubStatement).
  */
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (!(await guardBrain(req, res))) return
@@ -26,8 +27,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
     if (req.method === 'DELETE') {
       const id = typeof req.query.id === 'string' ? req.query.id : ''
+      const note = (await store.listNotes(BRAIN_SESSION_ID)).find((n) => n.id === id)
       const ok = await store.deleteNote(BRAIN_SESSION_ID, id)
-      return res.status(ok ? 200 : 404).json({ ok })
+      // Forget fully: the statement also lives in saved chat history, which the
+      // model reads on resume. Remove those exact messages (and the reply
+      // right after) so the fact is not silently resurrected from history.
+      const scrubbed = ok && note ? await store.scrubStatement(BRAIN_SESSION_ID, note.text) : 0
+      return res.status(ok ? 200 : 404).json({ ok, scrubbedMessages: scrubbed })
     }
     return res.status(405).json({ error: 'Method not allowed' })
   } catch (err: any) {

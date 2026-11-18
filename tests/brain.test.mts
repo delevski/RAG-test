@@ -123,6 +123,11 @@ try {
   {
     const target = (await listNotes()).find((n) => /נתניה/.test(n.text))!
     let r = fakeRes(); await notesApi({ method: 'DELETE', headers: OWNER, query: { id: target.id } }, r); assert.equal(r.statusCode, 200)
+    assert.equal(JSON.parse(r.body).scrubbedMessages, 2, 'the statement and the reply right after it are removed from saved chats')
+    r = fakeRes(); await convApi({ method: 'GET', headers: OWNER, query: { id: 'conv-c' } }, r)
+    assert.equal(JSON.parse(r.body).messages.length, 0, 'forgotten statement is not resurrected from saved history')
+    r = fakeRes(); await convApi({ method: 'GET', headers: OWNER, query: { id: 'conv-d' } }, r)
+    assert.equal(JSON.parse(r.body).messages.length, 4, 'unrelated messages stay')
     r = fakeRes(); await notesApi({ method: 'DELETE', headers: OWNER, query: { id: target.id } }, r); assert.equal(r.statusCode, 404)
     r = fakeRes(); await notesApi({ method: 'DELETE', headers: OWNER, query: { id: '1; DROP TABLE x' } }, r); assert.equal(r.statusCode, 404)
     await ask('איפה אני גר?', 'conv-e')
@@ -136,7 +141,7 @@ try {
   {
     let r = fakeRes(); await convApi({ method: 'GET', headers: OWNER, query: {} }, r)
     const list = JSON.parse(r.body).conversations as any[]
-    assert.ok(list.length >= 5)
+    assert.ok(list.length >= 4)
     assert.ok(list.find((c) => c.id === 'conv-a').title.includes('I live in Haifa'))
     r = fakeRes(); await convApi({ method: 'GET', headers: OWNER, query: { id: 'conv-a' } }, r)
     assert.equal(JSON.parse(r.body).messages.length, 2)
@@ -175,7 +180,7 @@ try {
   // 8. Overflow: old matching notes (Hebrew prefix-insensitive) still surface; unrelated old ones do not.
   {
     const mk = (i: number, text: string) => ({ id: String(i), text, ts: `2026-01-${String((i % 28) + 1).padStart(2, '0')}T00:00:00.000Z` })
-    const notes = [mk(1, 'אני גר בחיפה'), mk(2, 'My passport expires in 2031'), ...Array.from({ length: 300 }, (_, i) => mk(i + 3, `filler note number ${i} ` + 'x'.repeat(80)))]
+    const notes = [mk(1, 'אני גר בחיפה'), mk(2, 'My passport expires in 2031'), ...Array.from({ length: 600 }, (_, i) => mk(i + 3, `filler note number ${i} ` + 'x'.repeat(80)))]
     const picked = selectNotes(notes, 'איזה עיר גרתי חיפה?')
     assert.ok(picked.some((n) => n.id === '1'), 'old Hebrew note matched through prefix stripping')
     assert.ok(!picked.some((n) => n.id === '2'), 'unrelated old note excluded')
@@ -184,6 +189,26 @@ try {
     assert.equal(noteFromUserMessage('where is it ?'), null)
     assert.equal(noteFromUserMessage('hi'), null)
     assert.equal(formatNotes([]), '(none)')
+  }
+  // 9. Latest facts must not depend on the last 12 turns: an early fact survives hundreds of
+  // unrelated notes and a new conversation (all of them fit the always-included budget).
+  {
+    fs.rmSync(brainDir, { recursive: true, force: true })
+    await ask('I live in Haifa.', 'early')
+    for (let i = 0; i < 250; i++) await notesApi({ method: 'POST', headers: OWNER, query: {}, body: { text: `Unrelated fact ${i}: the meeting room code is ${1000 + i}` } }, fakeRes())
+    await ask('Which place do I call home?', 'much-later', [])
+    assert.match(systemOf(), /I live in Haifa/, 'early fact still reaches the model')
+    assert.ok(!/older saved notes are not shown/.test(systemOf()))
+    // Beyond the budget: concept match finds the old note and the prompt says notes were omitted.
+    for (let i = 0; i < 500; i++) await notesApi({ method: 'POST', headers: OWNER, query: {}, body: { text: `Filler ${i} ` + 'z'.repeat(100) } }, fakeRes())
+    await ask('Where is my home city?', 'much-later-2', [])
+    assert.match(systemOf(), /I live in Haifa/, 'old note found by concept match after overflow')
+    assert.match(systemOf(), /older saved notes are not shown/)
+    // A newer contradictory fact is the newest note and sorts last.
+    await ask('I moved to Eilat.', 'upd')
+    await ask('Where do I live?', 'upd-2')
+    const s = systemOf()
+    assert.ok(s.indexOf('I live in Haifa') < s.indexOf('I moved to Eilat'))
   }
   console.log('brain: OK')
 } finally {

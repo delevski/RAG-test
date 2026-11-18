@@ -34,6 +34,7 @@ export default function HomePage() {
   // written to localStorage). null = still resolving on connect.
   const [brainConv, setBrainConv] = useState<string | null>(null)
   const [brainRefresh, setBrainRefresh] = useState(0)
+  const [brainReload, setBrainReload] = useState(0)
   const authHeaders = useMemo(() => {
     const h: Record<string, string> = {}
     if (ownerToken) h['x-owner-token'] = ownerToken
@@ -254,6 +255,7 @@ export default function HomePage() {
           setMobileTab('chat')
         }}
         onDeletedActive={() => setBrainConv(crypto.randomUUID())}
+        onForgot={() => setBrainReload((n) => n + 1)}
       />
     ) : null
 
@@ -323,7 +325,7 @@ export default function HomePage() {
         {/* Chat panel */}
         <div className={`flex-1 overflow-hidden ${mobileTab === 'chat' ? '' : 'hidden lg:block'}`}>
           <ChatInterface
-            key={`${sessionId}:${brainConv ?? ''}`}
+            key={`${sessionId}:${brainConv ?? ''}:${brainReload}`}
             conversationId={brain ? brainConv ?? undefined : undefined}
             onTurnDone={() => setBrainRefresh((n) => n + 1)}
             sessionId={sessionId}

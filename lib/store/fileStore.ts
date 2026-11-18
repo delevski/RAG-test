@@ -202,6 +202,23 @@ export class FileSessionStore implements SessionStore {
     return this.readNotes(sessionId)
   }
 
+  async scrubStatement(sessionId: string, text: string): Promise<number> {
+    const rows = await this.readMessages(sessionId)
+    const drop = new Set<number>()
+    rows.forEach((r, i) => {
+      if (r.role !== 'user' || r.content.slice(0, 1000) !== text) return
+      drop.add(i)
+      for (let j = i + 1; j < rows.length; j++) {
+        if (rows[j].c !== r.c) continue
+        if (rows[j].role === 'assistant') drop.add(j)
+        break
+      }
+    })
+    if (drop.size === 0) return 0
+    await this.writeMessages(sessionId, rows.filter((_, i) => !drop.has(i)))
+    return drop.size
+  }
+
   async deleteNote(sessionId: string, noteId: string): Promise<boolean> {
     const notes = await this.readNotes(sessionId)
     const left = notes.filter((n) => n.id !== noteId)

@@ -116,7 +116,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     let notesText = '(none)'
     if (brain) {
       const store = await getSessionStore()
-      notesText = formatNotes(selectNotes(await store.listNotes(sessionId), query))
+      const all = await store.listNotes(sessionId)
+      const chosen = selectNotes(all, query)
+      notesText = formatNotes(chosen, all.length - chosen.length)
     }
     const { sources } = await runRagQuery(
       sessionId,

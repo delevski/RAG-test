@@ -66,7 +66,7 @@ export type Note = { id: string; text: string; ts: string }
 export const MAX_NOTE_CHARS = 1000
 export const MAX_NOTES = 2000
 /** Notes always included verbatim (newest first) up to this many characters. */
-export const NOTES_CHAR_BUDGET = 12000
+export const NOTES_CHAR_BUDGET = 40000
 /** Extra budget for older notes that lexically match the question. */
 export const OLD_NOTES_CHAR_BUDGET = 4000
 
@@ -87,13 +87,40 @@ export function noteFromUserMessage(text: string): string | null {
 }
 
 const HE_PREFIX = /^[\u05d4\u05d5\u05d1\u05dc\u05de\u05e9\u05db]{1,2}(?=[\u0590-\u05ff]{3,})/
-function tokens(text: string): Set<string> {
+/**
+ * Zero-cost concept groups so an OLD note can still be found by a paraphrase
+ * once the brain outgrows the always-included budget (no embedding provider).
+ * Small on purpose; the always-included recent budget is the main mechanism.
+ */
+const CONCEPTS: string[][] = [
+  ['live', 'lives', 'living', 'lived', 'reside', 'resides', 'home', 'address', 'city', 'town', 'moved', 'based', 'גר', 'גרה', 'גרים', 'מתגורר', 'מתגוררת', 'מגורים', 'בית', 'עיר', 'כתובת', 'עברתי', 'התגורר'],
+  ['name', 'called', 'שם', 'קוראים', 'נקרא'],
+  ['work', 'works', 'job', 'employer', 'company', 'עובד', 'עובדת', 'עבודה', 'משרה', 'חברה', 'מעסיק'],
+  ['phone', 'number', 'mobile', 'cell', 'טלפון', 'נייד', 'מספר', 'פלאפון'],
+  ['email', 'mail', 'מייל', 'אימייל', 'דואל'],
+  ['birthday', 'born', 'birth', 'age', 'יום', 'נולד', 'נולדתי', 'גיל', 'יומולדת'],
+  ['favorite', 'favourite', 'like', 'likes', 'love', 'אוהב', 'אוהבת', 'מועדף', 'חיבוב'],
+]
+const STOP = new Set(('is are was were am be do does did the a an of to in on at it its my me i you your we they he she this that these those and or but not no so if then there here ' +
+  'what where when which who whom how why with for from by about as have has had can could would should will just now these ' +
+  'של את אני אנחנו הוא היא הם הן מה איפה מתי מי איך למה על עם אל זה זאת זו או גם לא כן יש אין').split(' '))
+const CONCEPT_OF = new Map<string, number>()
+CONCEPTS.forEach((g, i) => g.forEach((w) => CONCEPT_OF.set(w, i)))
+
+function tokens(text: string, expand = false): Set<string> {
   const out = new Set<string>()
+  const add = (w: string) => {
+    out.add(w)
+    if (expand) {
+      const c = CONCEPT_OF.get(w)
+      if (c !== undefined) out.add(`#concept${c}`)
+    }
+  }
   for (const raw of text.toLowerCase().split(/[^a-z0-9\u0590-\u05ff]+/)) {
-    if (raw.length < 2) continue
-    out.add(raw)
+    if (raw.length < 2 || STOP.has(raw)) continue
+    add(raw)
     const stripped = raw.replace(HE_PREFIX, '')
-    if (stripped !== raw && stripped.length >= 2) out.add(stripped)
+    if (stripped !== raw && stripped.length >= 2) add(stripped)
   }
   return out
 }
@@ -116,11 +143,11 @@ export function selectNotes(notes: Note[], question: string): Note[] {
   }
   const rest = notes.filter((n) => !picked.has(n.id))
   if (rest.length > 0) {
-    const q = tokens(question)
+    const q = tokens(question, true)
     const scored = rest
       .map((n) => {
         let hits = 0
-        for (const t of tokens(n.text)) if (q.has(t)) hits++
+        for (const t of tokens(n.text, true)) if (q.has(t)) hits++
         return { n, hits }
       })
       .filter((x) => x.hits > 0)
@@ -135,9 +162,11 @@ export function selectNotes(notes: Note[], question: string): Note[] {
   return notes.filter((n) => picked.has(n.id))
 }
 
-export function formatNotes(notes: Note[]): string {
-  if (notes.length === 0) return '(none)'
-  return notes.map((n) => `- [${n.ts.slice(0, 10)}] ${n.text.replace(/\s+/g, ' ')}`).join('\n')
+export function formatNotes(notes: Note[], omitted = 0): string {
+  if (notes.length === 0 && omitted === 0) return '(none)'
+  const lines = notes.map((n) => `- [${n.ts.slice(0, 10)}] ${n.text.replace(/\s+/g, ' ')}`)
+  if (omitted > 0) lines.unshift(`(${omitted} older saved notes are not shown; if the answer may be among them, say so instead of guessing)`)
+  return lines.join('\n')
 }
 
 /** Shared guard for the owner-only brain endpoints: false = response already sent. */

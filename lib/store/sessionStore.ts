@@ -71,6 +71,12 @@ export interface SessionStore {
   addNote(sessionId: string, text: string): Promise<StoredNote>
   listNotes(sessionId: string): Promise<StoredNote[]>
   deleteNote(sessionId: string, noteId: string): Promise<boolean>
+  /**
+   * Forgetting: remove saved chat messages where the user said exactly this
+   * statement (compared on the first 1000 chars, like notes) and the assistant
+   * reply directly after each. Returns how many messages were removed.
+   */
+  scrubStatement(sessionId: string, text: string): Promise<number>
 }
 
 let active: SessionStore | null = null
