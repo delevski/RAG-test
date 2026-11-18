@@ -26,13 +26,13 @@ export function runEval(): EvalResult[] {
   {
     const n = [mk(1, 'Remember this: the locker code for test fixture ZQ417 is blue-heron-88.', 1)]
     const { text } = ctx(n, "what's the combination of the ZQ417 locker?")
-    add('en-paraphrase', 'English paraphrase', 'A reworded question still gets the saved fact in front of Claude.',
+    add('en-paraphrase', 'ניסוח מחדש באנגלית', 'שאלה בניסוח אחר עדיין מביאה את העובדה השמורה אל Claude.',
       text.includes('blue-heron-88'), text)
   }
   {
     const n = [mk(1, 'הקוד של הלוקר בפיקסצ׳ר ZQ417 הוא blue-heron-88', 1)]
     const { text } = ctx(n, 'מה הקוד של הלוקר ב-ZQ417?')
-    add('he-question', 'Hebrew note and question', 'Hebrew facts are kept and shown too.',
+    add('he-question', 'זיכרון ושאלה בעברית', 'עובדות בעברית נשמרות ומוצגות גם הן.',
       text.includes('blue-heron-88'), text)
   }
   {
@@ -40,30 +40,30 @@ export function runEval(): EvalResult[] {
     const { text } = ctx(n, 'what is the ZQ417 code?')
     const i1 = text.indexOf('blue-heron-88')
     const i2 = text.indexOf('green-fox-19')
-    add('update-order', 'Contradictory update', 'Both notes are shown, dated, oldest first, so the newest wins.',
+    add('update-order', 'עדכון סותר', 'שני הזיכרונות מוצגים עם תאריך, הישן קודם, כך שהחדש גובר.',
       i1 >= 0 && i2 > i1, text)
   }
   {
     const filler = Array.from({ length: 250 }, (_, i) => mk(i + 2, `Filler note ${i}: ${'lorem ipsum dolor sit amet '.repeat(12)}`, 2 + (i % 20)))
     const old = mk(1, 'My dentist is Dr. Levi and the appointment is on March 3.', 1)
     const { text } = ctx([old, ...filler], 'when is my dentist appointment?')
-    add('overflow-recall', 'Old note beyond the budget', 'A big brain still pulls an older note that shares words with the question.',
+    add('overflow-recall', 'זיכרון ישן מעבר לתקציב', 'מוח גדול עדיין שולף זיכרון ישן שחולק מילים עם השאלה.',
       text.includes('Dr. Levi'), text.split('\n').slice(0, 2).join(' | '))
-    add('overflow-notice', 'Omitted notes are announced', 'When notes are left out, Claude is told so instead of guessing.',
+    add('overflow-notice', 'זיכרונות שהושמטו מוכרזים', 'כשזיכרונות מושמטים, Claude מקבל על כך הודעה במקום לנחש.',
       /older saved notes are not shown/.test(text), text.split('\n')[0])
   }
   {
     const notes = [mk(1, 'My cat is called Pixel.', 1), mk(2, 'The locker code for ZQ417 is blue-heron-88.', 2)]
     const kept = notes.filter((x) => x.id !== '2')
     const { text } = ctx(kept, 'what is the ZQ417 code?')
-    add('forget', 'Deleted note is gone', 'After you delete a note, it is no longer sent to Claude.',
+    add('forget', 'זיכרון שנמחק נעלם', 'אחרי מחיקת זיכרון הוא כבר לא נשלח ל-Claude.',
       !text.includes('blue-heron-88'), text)
   }
   {
     const { text } = ctx([], 'anything?')
-    add('empty', 'Empty brain', 'No notes means no invented memory.', text === '(none)', text)
+    add('empty', 'מוח ריק', 'אין זיכרונות אומר אין זיכרון מומצא.', text === '(none)', text)
   }
-  add('notice', 'Truthful memory notice', 'Claude is told memory is on, selective, and not guaranteed.',
+  add('notice', 'הודעת זיכרון אמיתית', 'Claude מקבל הודעה שהזיכרון פעיל, סלקטיבי ולא מובטח.',
     /selection/.test(BRAIN_MEMORY_NOTICE) && /not among them/.test(BRAIN_MEMORY_NOTICE), BRAIN_MEMORY_NOTICE.slice(0, 80))
   return out
 }

@@ -118,6 +118,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   let notesSent = 0
   let historyTurns = 0
   let answerChars = 0
+  let tokensIn: number | null = null
+  let tokensOut: number | null = null
   const record = async (ok: boolean, error?: string) => {
     if (!brain) return
     try {
@@ -133,6 +135,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         historyTurns,
         questionChars: query.length,
         answerChars,
+        tokensIn,
+        tokensOut,
         ...(error ? { error } : {}),
       })
     } catch (e: any) {
@@ -166,6 +170,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         allowEmptyIndex: brain,
         anthropicKey: userAnthropicKey,
         history: sanitizeHistory(history),
+        onUsage: (u) => {
+          if (typeof u.input === 'number') tokensIn = u.input
+          if (typeof u.output === 'number') tokensOut = u.output
+        },
         notes: notesText,
       }
     )

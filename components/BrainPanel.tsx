@@ -92,6 +92,14 @@ export default function BrainPanel({
     <div className="space-y-5" data-testid="brain-panel">
       {error && <div className="text-[11px] text-red-300">{error}</div>}
 
+      <a
+        href="/lab"
+        target="_blank"
+        rel="noreferrer"
+        className="block rounded-lg border border-[var(--border)] px-3 py-2 text-center text-xs text-gray-200 hover:border-primary/50"
+      >
+        Learning lab · eval &amp; metrics
+      </a>
       <section className="space-y-2">
         <div className="flex items-center justify-between">
           <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-dim">Conversations</div>

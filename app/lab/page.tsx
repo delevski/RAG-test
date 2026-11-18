@@ -17,7 +17,7 @@ export default function LabPage() {
   async function load() {
     setErr('')
     const r = await fetch('/api/brain/lab', { headers: { 'x-owner-token': token } })
-    if (!r.ok) return setErr('Owner passphrase required')
+    if (!r.ok) return setErr('נדרשת סיסמת בעלים')
     setLab(await r.json())
   }
   async function ask() {
@@ -27,25 +27,25 @@ export default function LabPage() {
       headers: { 'x-owner-token': token, 'content-type': 'application/json' },
       body: JSON.stringify({ question }),
     })
-    if (!r.ok) return setErr('Could not trace this question')
+    if (!r.ok) return setErr('לא ניתן לעקוב אחרי השאלה')
     setTrace(await r.json())
   }
   const m = lab?.metrics
   const passed = lab?.eval.filter((e) => e.pass).length ?? 0
 
   return (
-    <main className="mx-auto max-w-4xl space-y-6 p-6 text-sm text-slate-200">
-      <h1 className="text-2xl font-semibold text-white">Second brain lab</h1>
+    <main dir="rtl" lang="he" className="mx-auto max-w-4xl space-y-6 p-6 text-sm text-slate-200">
+      <h1 className="text-2xl font-semibold text-white">מעבדת המוח השני</h1>
       <p className="text-slate-400">
-        See how one question moves through the brain, what is measured, and whether the retrieval step is correct.
-        Nothing here calls an AI model, so it costs nothing. Your passphrase stays in this tab only.
+        כאן רואים איך שאלה עוברת במוח: אילו זיכרונות נשלפים, מה נמדד בכל בקשה, והאם שלב השליפה נכון.
+        שום דבר כאן לא קורא למודל AI, ולכן זה בחינם. הסיסמה נשארת רק בלשונית הזו.
       </p>
 
       {!lab && (
         <div className={card + ' flex gap-2'}>
-          <input type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder="Owner passphrase"
+          <input type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder="סיסמת בעלים" dir="ltr"
             className="flex-1 rounded-lg border border-white/10 bg-black/30 px-3 py-2" />
-          <button onClick={load} className="rounded-lg bg-indigo-500 px-4 py-2 text-white">Open lab</button>
+          <button onClick={load} className="rounded-lg bg-indigo-500 px-4 py-2 text-white">פתח מעבדה</button>
         </div>
       )}
       {err && <p className="text-red-400">{err}</p>}
@@ -53,60 +53,61 @@ export default function LabPage() {
       {lab && (
         <>
           <section className={card}>
-            <h2 className="mb-2 text-lg font-medium text-white">1. Follow a question (no AI call)</h2>
+            <h2 className="mb-2 text-lg font-medium text-white">1. עוקבים אחרי שאלה (בלי קריאת AI)</h2>
             <div className="flex gap-2">
-              <input value={question} onChange={(e) => setQuestion(e.target.value)} placeholder="Ask something your brain might know"
+              <input value={question} onChange={(e) => setQuestion(e.target.value)} placeholder="שאל משהו שהמוח אולי יודע"
                 className="flex-1 rounded-lg border border-white/10 bg-black/30 px-3 py-2" />
-              <button onClick={ask} className="rounded-lg bg-indigo-500 px-4 py-2 text-white">Trace</button>
+              <button onClick={ask} className="rounded-lg bg-indigo-500 px-4 py-2 text-white">עקוב</button>
             </div>
             {trace && (
               <ol className="mt-3 list-decimal space-y-2 pl-5">
-                <li><b>Question</b>: {question}</li>
-                <li><b>Retrieve</b>: {trace.selected.length} of {trace.totalNotes} saved notes chosen
-                  {trace.omitted > 0 && `, ${trace.omitted} left out (Claude is told)`}.</li>
-                <li><b>What Claude would see</b> (notes block):
-                  <pre className="mt-1 whitespace-pre-wrap rounded-lg bg-black/40 p-2 text-xs">{trace.notesBlock}</pre></li>
-                <li><b>Answer</b>: not generated here. A real answer is a paid Claude call, made only from the chat.
-                  It then appears below as a metrics row (counts and timing only).</li>
+                <li><b>שאלה</b>: {question}</li>
+                <li><b>שליפה</b>: נבחרו {trace.selected.length} מתוך {trace.totalNotes} זיכרונות שמורים
+                  {trace.omitted > 0 && `, ${trace.omitted} הושמטו (Claude מקבל על כך הודעה)`}.</li>
+                <li><b>מה Claude היה רואה</b> (בלוק הזיכרונות):
+                  <pre dir="ltr" className="mt-1 whitespace-pre-wrap rounded-lg bg-black/40 p-2 text-xs text-left">{trace.notesBlock}</pre></li>
+                <li><b>תשובה</b>: לא נוצרת כאן. תשובה אמיתית היא קריאה בתשלום ל-Claude, רק מהצ&apos;אט.
+                  אחר כך היא מופיעה למטה כשורת מדדים (ספירות וזמנים בלבד).</li>
               </ol>
             )}
           </section>
 
           <section className={card}>
-            <h2 className="mb-2 text-lg font-medium text-white">2. Metrics from real requests</h2>
+            <h2 className="mb-2 text-lg font-medium text-white">2. מדדי בקשות (אמיתיות ו-MOCK מסומנות בנפרד)</h2>
             <p className="mb-2 text-xs text-slate-400">
-              Counts and timings only, never the text of questions, answers or notes. Storage: {lab.driver}.
-              {lab.mockMode ? ' This deployment is in MOCK mode: answers are simulated.' : ''}
+              ספירות וזמנים בלבד, אף פעם לא טקסט של שאלות, תשובות או זיכרונות. אחסון: {lab.driver}.
+              {lab.mockMode ? ' הפריסה הזו במצב MOCK: התשובות מדומות ולא עולות כסף.' : ''}
             </p>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               {[
-                ['Requests', m?.requests], ['Failed', m?.failed], ['Real Claude', m?.claudeRequests], ['Mock', m?.mockRequests],
-                ['Median ms', m?.p50Ms], ['p95 ms', m?.p95Ms], ['Avg notes sent', m?.avgNotesSent], ['With omitted notes', m?.requestsWithOmittedNotes],
+                ['בקשות', m?.requests], ['נכשלו', m?.failed], ['Claude אמיתי', m?.claudeRequests], ['MOCK (מדומה)', m?.mockRequests],
+                ['חציון ms', m?.p50Ms], ['p95 ms', m?.p95Ms], ['ממוצע זיכרונות שנשלחו', m?.avgNotesSent], ['עם זיכרונות שהושמטו', m?.requestsWithOmittedNotes],
+                ['בקשות עם דיווח טוקנים', m?.tokenKnownRequests], ['טוקני קלט / פלט', m && m.tokenKnownRequests > 0 ? `${m.tokensIn} / ${m.tokensOut}` : 'לא ידוע'],
               ].map(([k, v]) => (
                 <div key={String(k)} className="rounded-lg bg-black/30 p-3"><div className="text-xs text-slate-400">{k}</div><div className="text-xl text-white">{String(v ?? 0)}</div></div>
               ))}
             </div>
             {lab.recent.length > 0 && (
               <table className="mt-3 w-full text-left text-xs">
-                <thead className="text-slate-400"><tr><th>Time</th><th>Provider</th><th>ms</th><th>Notes sent/total</th><th>OK</th></tr></thead>
+                <thead className="text-slate-400"><tr><th>שעה</th><th>ספק</th><th>ms</th><th>זיכרונות נשלחו/סך הכל</th><th>טוקנים</th><th>תקין</th></tr></thead>
                 <tbody>{lab.recent.map((e, i) => (
-                  <tr key={i} className="border-t border-white/5"><td>{String(e.ts).slice(11, 19)}</td><td>{e.provider}</td><td>{e.ms}</td><td>{e.notesSent}/{e.notesTotal}</td><td>{e.ok ? 'yes' : e.error || 'no'}</td></tr>
+                  <tr key={i} className="border-t border-white/5"><td>{String(e.ts).slice(11, 19)}</td><td>{e.provider}</td><td>{e.ms}</td><td>{e.notesSent}/{e.notesTotal}</td><td>{typeof e.tokensIn === 'number' ? `${e.tokensIn}/${e.tokensOut}` : 'לא ידוע'}</td><td>{e.ok ? 'כן' : e.error || 'לא'}</td></tr>
                 ))}</tbody>
               </table>
             )}
-            {lab.recent.length === 0 && <p className="mt-2 text-slate-400">No requests recorded yet. Chat in owner mode and they appear here.</p>}
+            {lab.recent.length === 0 && <p className="mt-2 text-slate-400">עדיין אין בקשות. שוחח במצב בעלים והן יופיעו כאן. טוקנים מוצגים רק כשהספק מדווח עליהם; אחרת &quot;לא ידוע&quot;, לא 0, וללא מחיר מומצא.</p>}
           </section>
 
           <section className={card}>
-            <h2 className="mb-1 text-lg font-medium text-white">3. Eval: is retrieval correct? ({passed}/{lab.eval.length} pass)</h2>
+            <h2 className="mb-1 text-lg font-medium text-white">3. בדיקת איכות לשליפה בלבד ({passed}/{lab.eval.length} עברו)</h2>
             <p className="mb-2 text-xs text-slate-400">
-              Synthetic notes, run live on the server, no AI. This checks which notes reach Claude, not what Claude replies.
-              Checking replies needs paid calls and is run by hand with a cap.
+              זיכרונות סינתטיים, רצים חי בשרת, בלי AI. זה בודק אילו זיכרונות מגיעים ל-Claude, לא מה Claude עונה.
+              בדיקת איכות התשובות דורשת קריאות בתשלום ורצה ידנית עם תקרה.
             </p>
             <ul className="space-y-2">
               {lab.eval.map((e) => (
                 <li key={e.id} className="rounded-lg bg-black/30 p-3">
-                  <div><span className={e.pass ? 'text-emerald-400' : 'text-red-400'}>{e.pass ? 'PASS' : 'FAIL'}</span> <b>{e.title}</b></div>
+                  <div><span className={e.pass ? 'text-emerald-400' : 'text-red-400'}>{e.pass ? 'עבר' : 'נכשל'}</span> <b>{e.title}</b></div>
                   <div className="text-xs text-slate-400">{e.why}</div>
                 </li>
               ))}

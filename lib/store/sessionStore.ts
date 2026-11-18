@@ -88,7 +88,9 @@ export async function getSessionStore(): Promise<SessionStore> {
   if (active) return active
   const pgUrl =
     process.env.RAG_DATABASE_URL || process.env.RAG_DATABASE_POSTGRES_URL
-  if (pgUrl) {
+  // RAG_FORCE_FILE_STORE=1 isolates a demo deployment from any database:
+  // temporary files only, so it can never show the owner's saved notes.
+  if (pgUrl && process.env.RAG_FORCE_FILE_STORE !== '1') {
     const { NeonSessionStore } = await import('./neonStore')
     active = new NeonSessionStore(pgUrl)
   } else {
@@ -96,7 +98,7 @@ export async function getSessionStore(): Promise<SessionStore> {
     // so silently falling back would lose every document on the next cold
     // start - the exact bug this layer exists to fix. Preview and local
     // development keep the file driver as the documented demo mode.
-    if (process.env.VERCEL_ENV === 'production' && process.env.RAG_ALLOW_EPHEMERAL !== '1') {
+    if (process.env.RAG_FORCE_FILE_STORE !== '1' && process.env.VERCEL_ENV === 'production' && process.env.RAG_ALLOW_EPHEMERAL !== '1') {
       throw new Error(
         'RAG_STORAGE_UNCONFIGURED: no durable store is configured for Production. ' +
           'Extend RAG_DATABASE_URL / RAG_DATABASE_POSTGRES_URL to the Production environment ' +

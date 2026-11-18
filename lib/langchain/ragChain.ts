@@ -72,6 +72,8 @@ export async function runRagQuery(
     allowEmptyIndex?: boolean
     /** Pre-formatted saved notes (second brain); '(none)' otherwise. */
     notes?: string
+    /** Best effort: called with provider-reported token usage when it is available. */
+    onUsage?: (u: { input?: number; output?: number }) => void
   } = {}
 ): Promise<RagResult> {
   let context = ''
@@ -135,7 +137,16 @@ export async function runRagQuery(
       },
     })
     const chain = prompt.pipe(llm).pipe(new TextOnlyOutputParser())
-    const stream = await chain.stream({ context, question: query, history, notes: opts.notes ?? '(none)' })
+    const usageCb = {
+      handleLLMEnd: (out: any) => {
+        const um = out?.generations?.[0]?.[0]?.message?.usage_metadata
+        if (um && opts.onUsage) opts.onUsage({ input: um.input_tokens, output: um.output_tokens })
+      },
+    }
+    const stream = await chain.stream(
+      { context, question: query, history, notes: opts.notes ?? '(none)' },
+      { callbacks: [usageCb] }
+    )
     let answered = false
     for await (const chunk of stream) {
       if (typeof chunk === 'string' && chunk.length > 0) {

@@ -16,6 +16,9 @@ export type RagEvent = {
   historyTurns: number
   questionChars: number
   answerChars: number
+  /** Provider-reported tokens. null = the provider did not report them (unknown, NOT zero). */
+  tokensIn?: number | null
+  tokensOut?: number | null
   error?: string
 }
 
@@ -36,6 +39,10 @@ export function summarizeEvents(events: RagEvent[]) {
     p95Ms: pct(0.95),
     avgNotesSent: n === 0 ? 0 : Math.round((sum((e) => e.notesSent) / n) * 10) / 10,
     requestsWithOmittedNotes: events.filter((e) => e.notesOmitted > 0).length,
+    /** Requests where the provider reported usage; the rest are unknown, never counted as 0. */
+    tokenKnownRequests: events.filter((e) => typeof e.tokensIn === 'number').length,
+    tokensIn: sum((e) => (typeof e.tokensIn === 'number' ? e.tokensIn : 0)),
+    tokensOut: sum((e) => (typeof e.tokensOut === 'number' ? e.tokensOut : 0)),
     totalQuestionChars: sum((e) => e.questionChars),
     totalAnswerChars: sum((e) => e.answerChars),
   }
