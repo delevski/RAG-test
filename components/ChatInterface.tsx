@@ -44,12 +44,20 @@ function Citations({ sources }: { sources: Citation[] }) {
   const [open, setOpen] = useState<number | null>(null)
   // One chip per document. Several retrieved passages from the same file are
   // all kept (shown on tap), not repeated as identical chips.
-  const groups: { name: string; passages: string[] }[] = []
+  // Identity is the stored-file key when present (two uploads with the same
+  // name but different files stay separate), else the name.
+  const groups: { id: string; name: string; label: string; passages: string[] }[] = []
   for (const s of sources) {
-    const g = groups.find((x) => x.name === s.name)
+    const id = (s as any).docKey ?? s.name
+    const g = groups.find((x) => x.id === id)
     if (g) g.passages.push(s.snippet)
-    else groups.push({ name: s.name, passages: [s.snippet] })
+    else groups.push({ id, name: s.name, label: s.name, passages: [s.snippet] })
   }
+  // Same visible name, different files: number them so they are distinguishable.
+  const byName: Record<string, number> = {}
+  for (const g of groups) byName[g.name] = (byName[g.name] ?? 0) + 1
+  const seenN: Record<string, number> = {}
+  for (const g of groups) if (byName[g.name] > 1) g.label = `${g.name} (${(seenN[g.name] = (seenN[g.name] ?? 0) + 1)})`
   return (
     <div className="mt-2.5 pt-2.5 border-t border-[var(--border)]">
       <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-dim mb-1.5">
@@ -72,7 +80,7 @@ function Citations({ sources }: { sources: Citation[] }) {
             }`}
           >
             <FileIcon className="w-3 h-3" />
-            <span className="max-w-[180px] truncate">{g.name}</span>
+            <span className="max-w-[180px] truncate">{g.label}</span>
             {g.passages.length > 1 && (
               <span className="rounded-full bg-white/10 px-1.5 text-[10px] text-white/80">
                 {g.passages.length} passages
