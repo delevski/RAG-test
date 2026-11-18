@@ -2,8 +2,11 @@
 // `top_p: -1` (@langchain/anthropic 0.3.x default, production log
 // req_011ChA1BnQNTQADW24LrRPFm) and `temperature` ("deprecated for this
 // model", req_011ChA3HhXq5Hw16wkjrFeuW). The ragChain BYOK/owner path must
-// omit all three. Captures the real outgoing request body through a fetch
-// stub: no network, no paid AI.
+// omit all three. `thinking` is the opposite case: omitting it lets the API
+// default apply and the model streams thinking blocks (production /api/query
+// "Cannot coerce \"thinking\" message part into a string", NOV 18 10:13), so
+// the request must carry thinking: {type:'disabled'} explicitly. Captures
+// the real outgoing request body through a fetch stub: no network, no paid AI.
 import assert from 'node:assert/strict'
 import { runRagQuery } from '../lib/langchain/ragChain'
 
@@ -29,15 +32,19 @@ try {
   assert.ok(!('temperature' in params), `temperature must be omitted, got ${params.temperature}`)
   assert.ok(!('top_p' in params), `top_p must be omitted, got ${params.top_p}`)
   assert.ok(!('top_k' in params), `top_k must be omitted, got ${params.top_k}`)
-  assert.ok(!('thinking' in params), `thinking must be omitted, got ${JSON.stringify(params.thinking)}`)
+  assert.deepEqual(
+    params.thinking,
+    { type: 'disabled' },
+    `thinking must be explicitly disabled, got ${JSON.stringify(params.thinking)}`
+  )
   assert.deepEqual(
     Object.keys(params).sort(),
-    ['max_tokens', 'messages', 'model', 'stream', 'system'],
-    `request must carry only required fields, got ${Object.keys(params).sort()}`
+    ['max_tokens', 'messages', 'model', 'stream', 'system', 'thinking'],
+    `request must carry only required fields + thinking, got ${Object.keys(params).sort()}`
   )
   assert.equal(params.max_tokens, 2048)
   assert.equal(params.stream, true)
-  console.log('anthropic-payload: OK (sampling params + thinking omitted; only required fields sent)')
+  console.log('anthropic-payload: OK (sampling params omitted; thinking explicitly disabled)')
 } finally {
   globalThis.fetch = realFetch
 }
