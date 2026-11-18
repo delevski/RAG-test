@@ -86,7 +86,7 @@ export default function LabPage() {
             <h2 className="mb-2 text-lg font-medium text-white">2. מדדי בקשות (אמיתיות ו-MOCK מסומנות בנפרד)</h2>
             <p className="mb-2 text-xs text-slate-400">
               ספירות וזמנים בלבד, אף פעם לא טקסט של שאלות, תשובות או זיכרונות. אחסון: {lab.driver}.
-              {lab.mockMode ? ' הפריסה הזו במצב MOCK: התשובות מדומות ולא עולות כסף.' : ''}
+              {lab.mockMode ? ' מצב MOCK פעיל בפריסה: בלי מפתח תשובות מדומות. בקשת בעלים עם מפתח Claude היא אמיתית ומסומנת "Claude אמיתי" בנפרד.' : ''}
             </p>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               {[

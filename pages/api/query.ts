@@ -126,7 +126,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const store = await getSessionStore()
       await store.addEvent(sessionId, {
         ts: new Date().toISOString(),
-        provider: RAG_MOCK_ENABLED ? 'mock' : 'claude',
+        provider: claude ? 'claude' : 'mock',
         ok,
         ms: Date.now() - startedAt,
         notesTotal,
