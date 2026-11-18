@@ -1,10 +1,39 @@
 import { ChatOpenAI } from '@langchain/openai'
 import { ChatAnthropic } from '@langchain/anthropic'
 import { StringOutputParser } from '@langchain/core/output_parsers'
+import type { MessageContentComplex, MessageContentText } from '@langchain/core/messages'
 import { formatDocumentsAsString } from 'langchain/util/document'
 import { searchSession } from './retriever'
 import { buildRagPrompt } from '@/utils/promptTemplates'
 import { mockChatStream, RAG_MOCK_ENABLED, PAID_AI_DISABLED, paidAIAllowed } from '@/lib/ai/mock'
+
+/**
+ * StringOutputParser, but tolerant of non-text content parts. On Claude 5.x
+ * thinking is adaptive and on by default
+ * (https://docs.anthropic.com/en/docs/build-with-claude/thinking): when a
+ * request leaves `thinking` unset the model may stream thinking blocks, and
+ * the stock parser then throws `Cannot coerce "thinking" message part into
+ * a string`, losing the whole answer (production /api/query log, NOV 18
+ * 10:13:40 + 10:13:58).
+ *
+ * Text and text_delta parts stream through unchanged; thinking,
+ * redacted_thinking, tool_use and any other part type are dropped (this
+ * chain binds no tools, so nothing renderable is lost). Limit: a response
+ * containing no text at all yields zero tokens - runRagQuery turns that
+ * into EMPTY_MODEL_RESPONSE instead of returning a silent empty answer.
+ */
+class TextOnlyOutputParser extends StringOutputParser {
+  static lc_name() {
+    return 'TextOnlyOutputParser'
+  }
+
+  protected override _messageContentComplexToString(content: MessageContentComplex): string {
+    if ((content.type === 'text' || content.type === 'text_delta') && 'text' in content) {
+      return (content as MessageContentText).text
+    }
+    return ''
+  }
+}
 
 export type SourceCitation = {
   name: string
@@ -68,23 +97,39 @@ export async function runRagQuery(
       // Current Claude models reject sampling params entirely: `top_p: -1`
       // (langchain 0.3.x default, production log req_011ChA1BnQNTQADW24LrRPFm)
       // and even an explicit `temperature` (400 "deprecated for this model",
-      // req_011ChA3HhXq5Hw16wkjrFeuW). Omit all three, plus the langchain
-      // default `thinking` block, so the serialized request carries only
-      // required fields: undefined keys drop out of the JSON.
+      // req_011ChA3HhXq5Hw16wkjrFeuW). Omit all three via invocationKwargs:
+      // undefined keys drop out of the JSON.
+      // `thinking` is the opposite case. On Claude Haiku 5.5 thinking is
+      // adaptive and ON by default; omitting the field let the model stream
+      // thinking blocks (the 10:13 crash - see TextOnlyOutputParser above).
+      // Per https://docs.anthropic.com/en/docs/build-with-claude/thinking,
+      // Haiku 5.5 accepts "disabled" at high effort or below, and the
+      // default effort on Haiku 5.5 is medium
+      // (https://docs.anthropic.com/en/docs/build-with-claude/adaptive-thinking);
+      // this request sets no effort. Thinking tokens are billed as output
+      // tokens even when hidden, so disabling also avoids that spend per
+      // answer. langchain's own default here is {type:'disabled'}, but PR #5
+      // showed what happens when it drops out of the serialized request -
+      // set it explicitly.
+      thinking: { type: 'disabled' },
       invocationKwargs: {
         temperature: undefined,
         top_p: undefined,
         top_k: undefined,
-        thinking: undefined,
       },
     })
-    const chain = prompt.pipe(llm).pipe(new StringOutputParser())
+    const chain = prompt.pipe(llm).pipe(new TextOnlyOutputParser())
     const stream = await chain.stream({ context, question: query })
+    let answered = false
     for await (const chunk of stream) {
-      if (typeof chunk === 'string') {
+      if (typeof chunk === 'string' && chunk.length > 0) {
+        answered = true
         onToken(chunk)
       }
     }
+    // A textless response (e.g. max_tokens exhausted mid-thought, or only
+    // non-text parts) must fail loudly, never succeed as an empty answer.
+    if (!answered) throw new Error('EMPTY_MODEL_RESPONSE')
     return { sources, usedContext: context.length > 0 }
   }
 
@@ -107,14 +152,17 @@ export async function runRagQuery(
     openAIApiKey: process.env.OPENAI_API_KEY,
   })
 
-  const chain = prompt.pipe(llm).pipe(new StringOutputParser())
+  const chain = prompt.pipe(llm).pipe(new TextOnlyOutputParser())
   const stream = await chain.stream({ context, question: query })
 
+  let answered = false
   for await (const chunk of stream) {
-    if (typeof chunk === 'string') {
+    if (typeof chunk === 'string' && chunk.length > 0) {
+      answered = true
       onToken(chunk)
     }
   }
+  if (!answered) throw new Error('EMPTY_MODEL_RESPONSE')
 
   return { sources, usedContext: context.length > 0 }
 }
